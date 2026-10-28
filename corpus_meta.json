@@ -1,0 +1,36 @@
+{
+  "days": [
+    {
+      "date": "2026-09-01",
+      "day_id": 0,
+      "transactions": 2013158,
+      "blocks": 7172,
+      "first_tx_index": 0,
+      "block_min": 25878705,
+      "block_max": 25885878,
+      "calldata_rows": 725509,
+      "calldata_matched": 725509,
+      "calldata_coverage": 0.3604,
+      "arg_truncated": 14552,
+      "arg_malformed": 30
+    },
+    {
+      "date": "2026-09-13",
+      "day_id": 1,
+      "transactions": 1476230,
+      "blocks": 7178,
+      "first_tx_index": 2013158,
+      "block_min": 25964781,
+      "block_max": 25971961,
+      "calldata_rows": 528577,
+      "calldata_matched": 528577,
+      "calldata_coverage": 0.3581,
+      "arg_truncated": 21127,
+      "arg_malformed": 54
+    }
+  ],
+  "record_bytes": 40,
+  "total_transactions": 3489388,
+  "distinct_addresses": 1216599,
+  "distinct_selectors": 58624
+}
