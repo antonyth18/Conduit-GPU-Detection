@@ -202,3 +202,96 @@ k under every policy, P3 included. That gives:
   against this floor; a policy can't do better than it. If the floor dominates,
   the gap between P2 and P3 will be small, and the hottest remaining constraint
   is a protocol rule (nonce order), not state contention.
+
+## Phase 4 — Correctness oracle
+
+Built by `oracle.py` and `compare.py`; numbers from `report_oracle.py`; tests in
+`test_oracle.py`. The oracle is a deliberately slow O(n²) reference and is
+never timed.
+
+### Definitions
+
+These are the contract that every fast implementation must match.
+
+- **Conflict:** two transactions share a key, and the pair of modes is neither
+  READ/READ nor COMMUTATIVE/COMMUTATIVE.
+- **Edge:** i → j for every conflicting pair with i < j in block order.
+- **Level:** the longest path, counted in edges, ending at the transaction. A
+  transaction with no incoming edge is at level 0.
+- **Critical path:** the number of levels, max(level) + 1, counted in
+  transactions.
+- **A schedule is valid** if every conflicting pair i < j has
+  level(i) < level(j). The original brief only required that no two
+  conflicting transactions share a level. That misses an *order inversion*:
+  a later transaction placed in an earlier level than one it conflicts with.
+  The validator checks every pair directly from the access sets and shares no
+  code with the edge or level code except the conflict rule.
+- **A comparison passes** if the levels are identical and every edge the
+  candidate drops is still implied by a path in its graph. It fails on
+  different levels, on a dropped edge that leaves a conflicting pair
+  unordered, or on an edge between transactions that don't conflict.
+
+### Results
+
+The slices are the first 500, 1,000 and 2,000 transactions of each day's median
+10k super-block (`2026-09-01/10k/099` and `2026-09-13/10k/073`). The reference
+outputs are saved in `oracle_ref/`, which is git-ignored and rebuilt by
+`report_oracle.py`.
+
+The validator accepted the oracle's own schedule in all 18 runs and rejected
+the deliberately broken one in all 18. Comparing the oracle with itself gave
+"identical" every time.
+
+Critical path in levels; the floor is the longest single-sender chain in the
+slice:
+
+| Day | n | P1 | P2 | P3 | Floor | P1/P3 | P2/P3 | P3/floor |
+|---|---|---|---|---|---|---|---|---|
+| Sep 1 | 500 | 83 | 16 | 9 | 8 | 9.2 | 1.8 | 1.12 |
+| Sep 1 | 1,000 | 208 | 55 | 17 | 17 | 12.2 | 3.2 | 1.00 |
+| Sep 1 | 2,000 | 380 | 68 | 35 | 26 | 10.9 | 1.9 | 1.35 |
+| Sep 13 | 500 | 99 | 26 | 10 | 10 | 9.9 | 2.6 | 1.00 |
+| Sep 13 | 1,000 | 218 | 29 | 21 | 19 | 10.4 | 1.4 | 1.11 |
+| Sep 13 | 2,000 | 445 | 39 | 26 | 26 | 17.1 | 1.5 | 1.00 |
+
+Edges and average parallelism (n ÷ critical path) at n = 2,000:
+
+| Day | P1 edges | P2 edges | P3 edges | P1 parallelism | P2 parallelism | P3 parallelism |
+|---|---|---|---|---|---|---|
+| Sep 1 | 99,664 | 8,395 | 5,533 | 5.3 | 29.4 | 57.1 |
+| Sep 13 | 114,511 | 6,292 | 4,035 | 4.5 | 51.3 | 76.9 |
+
+### Observations
+
+- **The Phase 3 prediction holds.** The critical path is never below the nonce
+  floor under any policy. Under P3 it sits at 1.00–1.35x the floor, exactly
+  on it in 3 of 6 slices. Once balance updates commute, sender nonce chains
+  are what bound the schedule.
+- **Policy precision matters a lot.** P1's critical path is 9–17x longer than
+  P3's, and P1 extracts only 4.5–6x average parallelism. P2 removes most of
+  that gap. P3 then roughly halves P2's critical path again on Sep 1, and on
+  Sep 13 it reaches the floor.
+- **P3's parallelism matches the Phase 3 bound.** At 2,000 transactions, P3 gives
+  57–77x average parallelism, in line with the ~61–69x bound from super-block
+  nonce chains.
+- **Batches are very uneven.** Level 0 holds most of the slice (993 of 2,000
+  transactions under P3 on Sep 1), while the median level has 12–14
+  transactions and the tail levels hold single transactions of the nonce
+  chain. Average parallelism hides this; executor efficiency will depend on
+  the long thin tail.
+- **The floor sender varies by slice.** In five of the six slices it is
+  `0x28c6c06298d514db089934071355e5743bf21d60`, in one
+  `0x559432e18b281731c054cd703d4b49872be4ed53`. Over a whole 10k–100k
+  super-block, `0x5594…ed53` dominates (Phase 3).
+
+### Caveat: commutative semantics
+
+Treating two COMMUTATIVE updates as conflict-free assumes:
+
+- the executor applies balance changes atomically, merging deltas rather than
+  having each transaction overwrite the balance;
+- the insufficient-balance revert is ignored. A debit can fail depending on
+  order, so it isn't strictly commutative.
+
+This is the OCToPus assumption that Phase 2 adopted. P3's numbers are
+therefore an optimistic bound on what commutativity can recover.
