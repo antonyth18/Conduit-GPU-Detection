@@ -16,6 +16,36 @@ section with a **Correction** note beside it, so the history remains readable.
 | C3 | "Once balance updates commute, sender nonce chains are what bound the schedule." | Phase 4 | Phase 6 | True for most super-blocks on Sep 13 but not on Sep 1. In about **95% of above-floor super-blocks on both days**, a single contract's chain of fallback WRITEs, most often a DEX router, is longer than the nonce floor and sets the critical path instead. |
 | C4 | Above-floor bursts are "mint storms". | Phase 6 (first draft) | Phase 6 | Mint-like contracts explain only the most extreme dips. The common cause is **DEX routers**: `0x68b3…fc45` alone sets the excess in 159 super-blocks. |
 | C5 | "A policy can't do better than [the ~65x bound]" (Phase 3 key finding). | Phase 3 | Phase 6 (refinement, not a reversal) | The bound held in all 2,208 runs. But it is not always *reached*: P3's median parallelism is 45–48x on Sep 1 and 58–64x on Sep 13, against a bound of ~61–69x. |
+| C6 | The deepest dip (`2026-09-01/10k/179`, 5.7x under P3) is a mint storm; C4 kept that label for "the deepest dips". | Phase 6 (first draft, kept by C4) | Phase 6 identity update | **Second correction to the same observation.** The contract is "Broker Boy (BROKERB)", a proxy contract that Etherscan lists with a token tracker. Its activity is a short launch burst: 99.7% of its lifetime transactions fall in our Sep 1 window. Whether the dominant call is a mint is **not established**: its selector, `0x4a21a2df`, is unidentified. All 1,786 calls fall back to contract granularity, so the dip is a **granularity artifact**, not measured contention. |
+| C7 | `0x5594…ed53` is "the busiest sender", described as an incidental address. | Phases 2, 3, 6 | Phase 6 identity update | **Reinterpretation, not a numeric change.** The address is an exchange hot wallet (Etherscan tag "OKX: Hot Wallet 5"). Every one of its 46,379 transactions in the corpus is a USDT `transfer()`. Withdrawal batching through one account with a strictly sequential nonce is a structural mechanism, not a quirk of these two days. |
+
+| C8 | The deepest dip's dominant selector `0x4a21a2df` is "unidentified", so whether it is a mint is "not established". | Phase 6 identity update (C6) | Phase 6 selector lookup | **Resolved: it is a mint.** 4byte.directory (accessed 2026-10-31) lists exactly one signature for `0x4a21a2df`: `mint((bytes32,bytes32[]),uint256,address,bytes)`, entry 860752. The `(bytes32, bytes32[])` argument has the shape of a Merkle allowlist proof. Together with the contract's NFT-style functions, the deepest dip is a **launch-day NFT mint on Broker Boy**. The first draft's "mint storm" was right for this dip; C6 over-corrected on that point. C6's other conclusions stand: it is a transient launch, and its contention is assumed at contract granularity. |
+
+**How the explanation of the deepest dip evolved.** It was revised twice,
+then resolved:
+
+1. **Phase 6 first draft:** an NFT mint storm.
+2. **C4:** mint storms explain only the extreme dips; DEX-router fallback
+   chains are the dominant cause above the floor.
+3. **C6:** the deepest dip is a launch burst on a new proxy contract, Broker
+   Boy, measured at contract granularity. "Mint" is neither established nor
+   ruled out.
+4. **C8:** the selector lookup shows it is a mint. The deepest dip is a
+   launch-day allowlist-style NFT mint on Broker Boy. Step 1's label was
+   right for this dip. Steps 2 and 3 stand: routers are still the common
+   cause above the floor, and the dip is still transient and measured at
+   contract granularity.
+
+Each step is visible where it was made.
+
+**Measured versus looked up.** Throughout this file:
+- **Measured** means computed from our corpus: call counts, sender counts,
+  selectors, critical paths, floors.
+- **Looked up** means taken from Etherscan: names, tags, lifetime
+  transaction counts, balances, deployment age. Each lookup cites
+  "Etherscan, accessed 2026-10-31".
+- **Selector names** such as `setApprovalForAll` come from standard 4-byte
+  signatures. They are interpretation, not measurement.
 
 ## Phase 1 — Corpus
 
@@ -118,6 +148,10 @@ decode failures are negligible.
   are `0x28c6c06298d514db089934071355e5743bf21d60` and
   `0x559432e18b281731c054cd703d4b49872be4ed53`, whose USDT balances, ETH
   balances and nonces top the W+C lists.
+  > **Identity (C7; looked up from Etherscan, accessed 2026-10-31).**
+  > `0x5594…ed53` is tagged "OKX: Hot Wallet 5". Its hot keys here are what an
+  > exchange withdrawal wallet produces: one outbound USDT balance and one
+  > sequential nonce.
 - **Nonces cap what P3 can gain.** P3 removes conflicts between balance
   updates, but each sender's nonce stays a WRITE. Under P3 the hottest
   WRITE-only key is the router contract
@@ -208,6 +242,10 @@ k under every policy, P3 included. That gives:
 - **One address is responsible in every representative sample.**
   `0x559432e18b281731c054cd703d4b49872be4ed53` sends about 1.5–1.7% of all
   transactions. It is the same address that topped Phase 2's hot keys on Sep 13.
+  > **Identity (C7).** This is an OKX exchange hot wallet (Etherscan, accessed
+  > 2026-10-31). The "one sender caps parallelism" result is therefore a
+  > statement about exchange withdrawal batching; see Phase 6, "Identities of
+  > the two key addresses".
 - **Bursts are worse on Sep 1.** The heaviest Sep 1 super-blocks have floors of
   up to 4,865 at 100k, a bound of about 21x. Sep 13's floors are much more uniform
   (at most 1,925).
@@ -576,6 +614,19 @@ That is why this phase reports distributions over every super-block.
 `0x559432e18b281731c054cd703d4b49872be4ed53` is the busiest sender in 498 of
 the 736 super-blocks (67.7%). No other sender exceeds 6.2%.
 
+> **Revised (C7).** A single centralized-exchange hot wallet sets the nonce
+> floor in 498 of 736 super-blocks (67.7%). Exchange withdrawal batching
+> concentrates thousands of outbound transfers into one account, whose nonce
+> is strictly sequential by protocol.
+>
+> - **Measured:** all 46,379 transactions this address sent in our corpus
+>   (25,001 on Sep 1, 21,378 on Sep 13) are decoded USDT `transfer()` calls.
+> - **Looked up:** Etherscan tags it "OKX: Hot Wallet 5" (accessed
+>   2026-10-31).
+>
+> The mechanism and its consequences are set out under "Identities of the two
+> key addresses" below.
+
 ### What holds P3 above the floor: fallback chains on one contract, mostly DEX routers
 
 For every P3 super-block, we compared the longest chain of WRITEs on a
@@ -617,6 +668,16 @@ tightening Question A.
 
 ### Extreme bursts: mint storms, also measured at P1 granularity
 
+> **Correction (C6).** The heading's "mint storms" is not established for
+> the deepest dip. Its contract, `0x062b…a298`, is the proxy contract "Broker
+> Boy (BROKERB)", seen in a launch burst; the dominant selector is
+> unidentified. See "Identities of the two key addresses" below. The
+> `0x0000…4bf5` rows are unaffected and still unverified.
+>
+> **Resolved (C8).** The selector is a `mint` function (4byte.directory,
+> accessed 2026-10-31). For the deepest dip the heading is correct: it is a
+> mint storm on a newly launched contract.
+
 The deepest dips, below about 13x parallelism under P3, come from a different
 fallback pattern: hundreds to thousands of distinct senders calling one
 contract with one selector.
@@ -640,9 +701,147 @@ contract with one selector.
   Correction to this phase's first draft (see C4): router fallback chains
   (previous section) affect far more super-blocks. Mint storms explain only
   the deepest dips.
+  > **Second correction (C6).** For the deepest dip the cause is a launch
+  > burst on a new proxy contract, not an established mint storm.
 
 `fig_bursts.png` shows bursts as short, deep dips through both days, while P1
 stays flat near 5x throughout.
+
+### Identities of the two key addresses (looked up, not measured)
+
+Both lookups are from Etherscan, accessed 2026-10-31, using the address
+pages for the two addresses. They don't change any measured number.
+
+#### `0x559432e18b281731c054cd703d4b49872be4ed53`: OKX hot wallet, the nonce-floor sender
+
+| Measured (our corpus) | Looked up (Etherscan, accessed 2026-10-31) |
+|---|---|
+| Sets the nonce floor in 498 of 736 super-blocks (67.7%) | Name tag "OKX: Hot Wallet 5"; labels "OKX" and "Exchange" |
+| Sent 46,379 transactions: 25,001 on Sep 1, 21,378 on Sep 13 | Funded by "OKX 3" |
+| **All 46,379 are decoded USDT `transfer()` calls**; no plain ETH, no other calls | 8,413,873 lifetime transactions; first about 1 yr 248 days before the lookup, latest minutes before it (still active) |
+| Hot USDT balance holder and hottest nonce in Phase 2 | Holds over $119M in tokens |
+
+**Mechanism.** It rests on the measured behaviour and would hold even if the
+public tag were wrong:
+
+1. Custodial exchanges pay out withdrawals from a small number of hot
+   wallets.
+2. Every transaction from one account has to take the next nonce, so the
+   protocol makes them strictly sequential.
+3. So a hot wallet sending k withdrawals in a batch forces a dependency
+   chain of length k, under every inference policy, P3 included.
+
+Our measurements show exactly that pattern: one address, only outbound USDT
+transfers, tens of thousands a day.
+
+**Why it generalizes.** It generalizes **by argument, not by sampling.** Any
+day sampled will contain exchange withdrawal batches, so this limit is
+predictable on any day. With only two days, we can't say how large it is on
+other days or how other exchanges structure theirs.
+
+**Implication for executor designers.** This bottleneck is an operational
+choice by one exchange, not a protocol constraint.
+- Withdrawals spread across k hot wallets would cut the chain each wallet
+  forces by about k.
+- No executor design can remove it from inside the block, because nonce
+  order is protocol-mandated.
+- Where it binds, the ceiling is set by exchange wallet policy, not by
+  execution technology.
+
+#### `0x062bd962fad2cf6df9ab91d6a41f55c1c20da298`: Broker Boy, the deepest dip
+
+| Measured (our corpus) | Looked up (Etherscan, accessed 2026-10-31) |
+|---|---|
+| 2,460 calls in the corpus, **all on Sep 1** (blocks 25,881,205–25,885,587), from 2,371 distinct senders; **0 on Sep 13** | Contract with token tracker "Broker Boy (BROKERB)"; "Source Code (Proxy)", implementation `0x325B20E1…58530c6ad` |
+| Worst super-block `2026-09-01/10k/179`: 1,786 calls from 1,775 senders; 1,776 succeeded, 10 failed | 2,467 lifetime transactions; ETH balance 0.000132 |
+| Selectors in that super-block: `0x4a21a2df` × 1,783 (unidentified), `0xa22cb465` × 3 | Recent calls labelled "Set Approval …" in the method column |
+| **Every call falls back** to contract granularity under P2 and P3; none is an ERC-20 `approve` (`0x095ea7b3`) | Created by `0xDCE5daAb…4cD2B0888` "59 days ago", relative to the lookup |
+| Selectors across the corpus: `0x4a21a2df` 2,384; `0x42842e0e` 50; `0xa22cb465` 22; `0x01d88f5d` 2; `0x3ccfd60b` 1; `0x55f804b3` 1 | |
+| No creation transaction in the corpus | |
+
+What follows from these, and how firmly:
+
+- **Inferred: almost its entire history is in our window.** 2,460 of 2,467
+  lifetime transactions (99.7%) are in our Sep 1 data. The burst's core spans
+  about 67 blocks, roughly 13 minutes.
+- **Inferred: it was launched on or about our snapshot day.** Etherscan's
+  "59 days ago" counts back from the lookup, not from the snapshot, which puts
+  deployment around Sep 1. That is consistent with its first call in our
+  corpus at block 25,881,205 on Sep 1. It is not "59 days before the
+  snapshot".
+  - The corpus contains no creation transaction for it. That is expected if
+    a factory contract deployed it through an internal call, which top-level
+    exports don't record. This is unconfirmed.
+- **Interpretation: its interface looks like an NFT (ERC-721) contract.**
+  Standard 4-byte signatures for its other selectors:
+  - `0xa22cb465` = `setApprovalForAll(address,bool)`
+  - `0x42842e0e` = `safeTransferFrom(address,address,uint256)`
+  - `0x55f804b3` = `setBaseURI(string)`
+  - `0x3ccfd60b` = `withdraw()`
+
+  Etherscan's "Set Approval …" label fits `setApprovalForAll`. The dominant
+  selector `0x4a21a2df` is unidentified, so **whether the burst is a mint is
+  not established**. It is neither confirmed nor ruled out; the selector
+  could be looked up on 4byte.directory or in the verified implementation
+  source.
+  > **Resolved (C8; looked up, 4byte.directory, accessed 2026-10-31).**
+  > `0x4a21a2df` = `mint((bytes32,bytes32[]),uint256,address,bytes)`, the
+  > only entry (ID 860752). The `(bytes32, bytes32[])` argument has the shape
+  > of a Merkle allowlist proof.
+  >
+  > Caveat: a 4-byte selector is a hash prefix, so collisions are possible.
+  > Here there is a single entry, and it fits the contract's ERC-721-style
+  > functions, so the identification is strong.
+  >
+  > **Conclusion:** the 1,783 calls are mints, and the deepest dip is a
+  > launch-day NFT mint.
+- **Measured: the dip is a granularity artifact, not established
+  contention.** No call is decodable under P2 or P3, so every one WRITEs the
+  whole contract. The 5.7x parallelism and the 1,786-level chain are what
+  contract granularity assumes for a burst of 1,775 distinct senders. Real
+  per-token state would conflict far less. A shared counter, if the function
+  has one, would conflict.
+  > **Refined (C8).** Knowing these are mints makes the direction of the
+  > bias uncertain rather than pessimistic. NFT mints commonly read and
+  > advance a shared token-id or supply counter. A counter whose value
+  > decides which token each caller receives is order-dependent, so it is
+  > not commutative.
+  >
+  > If this contract does that, real contention between the mints would be
+  > close to the serial chain that contract granularity assumes, and the
+  > 5.7x dip could be largely genuine. We can't tell from top-level data:
+  > the counter lives in internal state. The dip remains **assumed, not
+  > measured**, but it should no longer be presented as a lower bound on
+  > parallelism.
+
+**Presentation.** This is an **illustrative worst case, not a typical one,**
+and it does not generalize. It is a one-off launch of a contract with
+essentially no activity outside our window.
+
+### Durability of the two limits, and why real traffic was necessary
+
+The two verified limits differ sharply in how long they last:
+
+| | OKX hot wallet | Broker Boy |
+|---|---|---|
+| Kind | Structural: exchange withdrawal batching through one nonce | Transient: a launch burst on a new contract |
+| Lifetime | 8.4M transactions over more than 1.5 years, still active (looked up) | 2,467 transactions in total, 99.7% of them inside our window (measured against looked up) |
+| Predictable on another day? | Yes, by mechanism | No |
+| Measured or assumed contention | Measured: decoded USDT transfers and sequential nonces | Assumed: contract-granularity fallback |
+
+**Synthetic benchmarks would miss both.**
+- Generators of uniform or Zipf-distributed transfers produce neither exchange
+  withdrawal batching nor one-off contract launches.
+- The structural limit, one sender holding a large share of a batch, sets the
+  P3 critical path in about two-thirds of super-blocks. A synthetic workload
+  without it would overstate the available parallelism.
+- The transient limit produces the deepest dips (down to 5.7x). A synthetic
+  workload would never show it.
+
+Measuring real traffic was necessary to see either limit.
+
+**Scope.** This is still two days of Ethereum mainnet. The OKX mechanism
+generalizes by argument; the Broker Boy burst doesn't generalize at all.
 
 ### Batch shape
 
@@ -680,12 +879,33 @@ the busiest sender's nonce chain"; see C1 and C3):
    These are a granularity artifact: undecoded router calls WRITE the whole
    router account.
 
+> **Identities (C6, C7).**
+> - **Limit 1, where it binds,** is in 67.7% of super-blocks the nonce chain
+>   of one exchange hot wallet ("OKX: Hot Wallet 5"; Etherscan, accessed
+>   2026-10-31). It is structural and predictable.
+> - **The deepest dip under limit 2** is a transient launch burst on "Broker
+>   Boy (BROKERB)", also a granularity artifact.
+>
+> Neither would appear in a synthetic workload.
+>
+> **Resolved (C8).** That burst is a launch-day NFT mint (selector
+> `0x4a21a2df` = `mint(...)`; 4byte.directory, accessed 2026-10-31). Its
+> contention may be largely genuine if the mint advances a shared counter.
+
 The two remaining bounds on the result:
 - **Internal calls are invisible,** which makes every figure here an upper
   bound.
 - **About a third of transactions fall back to P1.** That makes the router
   chains and mint-storm bursts pessimistic: a lower bound on parallelism in
   the super-blocks they dominate.
+  > **Correction (C6).** "Mint-storm bursts" should read "single-contract
+  > launch and mint-like bursts". The deepest one, Broker Boy, is not an
+  > established mint.
+  >
+  > **Resolved (C8).** Broker Boy's burst is a mint. For mints the bias
+  > direction is uncertain: a shared, order-dependent counter would make the
+  > assumed chain roughly real. So "pessimistic" applies with confidence to
+  > the router chains only.
 
 These two biases point in opposite directions, so neither can be assumed to
 cancel the other. The next step that would most tighten the answer is
