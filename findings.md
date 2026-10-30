@@ -295,3 +295,141 @@ Treating two COMMUTATIVE updates as conflict-free assumes:
 
 This is the OCToPus assumption that Phase 2 adopted. P3's numbers are
 therefore an optimistic bound on what commutativity can recover.
+
+## Phase 5 — Sequential C++ pipeline
+
+A C++17 / CMake project with no dependencies, built with -O3 and run
+single-threaded:
+
+- `include/` and `src/`: the library;
+- `tools/conduit_run`: runs the pipeline and prints timings and statistics;
+- `tools/dump_access`: dumps access records for the cross-language check;
+- `tests/`: the C++ unit tests.
+
+The Python verification tools are `tools/xcheck_access.py` and
+`tools/verify_cpp.py`. Timings were measured on an Apple M2 (one
+performance core) and are reported as the median of 7 runs after 2
+discarded warm-up runs.
+
+### Design
+
+- **Access record:** 128 bits, held as two 64-bit words.
+  - The high word is the Phase 2 state key.
+  - The low word holds the transaction index (local to the super-block) in
+    bits 34:3 and the mode in bits 2:0.
+  - Sorting records as integers groups them by key, then orders them by block
+    position. No two records are equal, so the sort order is deterministic.
+- **Reduced edge rule.** Within each key, accesses in block order split into
+  runs: consecutive READs, consecutive COMMUTATIVEs, or a single WRITE. Every
+  access depends on every access in the previous run, and on nothing earlier.
+  - Every edge emitted is a real conflict.
+  - Every real conflict is still connected by a path through the runs in
+    between.
+  - So reachability and longest paths, and therefore levels, are identical to
+    the full conflict graph.
+- **READ next to COMMUTATIVE is the one exception.** Where a run of several
+  READs meets a run of several COMMUTATIVEs, every pair across them must get
+  an edge. Phase 2 never puts READ and COMMUTATIVE on the same key, and the
+  pipeline counted **0 such edges** on every super-block.
+- **Levelling** is one ascending sweep over the successor CSR, which is exact
+  and optimal sequentially. The OpenMP and CUDA versions will need
+  frontier-based relaxation instead, and that difference must be reported.
+
+### Verification
+
+- **The C++ policy port matches Python byte for byte.** This holds under P1, P2
+  and P3 on the whole corpus (3,489,388 transactions; 6.95M records under P1
+  and 15.06M under P2/P3). It also holds on each day's median super-block at
+  every target size, loaded through the C++ super-block path.
+- **The C++ levels match the oracle exactly on all 18 Phase 4 slices.** The
+  C++ graph has far fewer edges (on Sep 1 at n = 2,000 under P1, 1,721 instead
+  of 99,664), and every dropped edge is still implied by a path. There are no
+  spurious edges, and both validators accept.
+- **The fast validator accepts all 36 full-size runs.** That covers each day's
+  median super-block at every target from 10k to 100k, under all three
+  policies.
+  - The fast validator is new in `oracle.py`. Per key it tracks the highest
+    level seen so far for each mode, so it never enumerates pairs.
+  - Its tests require it to agree with the brute-force validator on
+    hand-built, random and real cases, including broken schedules.
+- **The critical path never drops below the single-sender floor.**
+- **Output is identical across repeated runs,** and the whole timed run peaks
+  at 224 MB of memory.
+
+### Critical path at full scale
+
+Median super-block per target; "÷ floor" is the critical path divided by the
+longest single-sender chain.
+
+| Day | Target | Floor | P1 levels | P2 levels | P3 levels | P1 ÷ floor | P2 ÷ floor | P3 ÷ floor |
+|---|---|---|---|---|---|---|---|---|
+| Sep 1 | 10k | 222 | 2,058 | 326 | 222 | 9.3 | 1.47 | 1.00 |
+| Sep 1 | 20k | 274 | 3,891 | 432 | 310 | 14.2 | 1.58 | 1.13 |
+| Sep 1 | 40k | 671 | 8,268 | 871 | 671 | 12.3 | 1.30 | 1.00 |
+| Sep 1 | 60k | 939 | 12,311 | 1,420 | 1,105 | 13.1 | 1.51 | 1.18 |
+| Sep 1 | 80k | 1,239 | 16,538 | 1,835 | 1,362 | 13.3 | 1.48 | 1.10 |
+| Sep 1 | 100k | 1,733 | 21,013 | 2,181 | 1,733 | 12.1 | 1.26 | 1.00 |
+| Sep 13 | 10k | 181 | 1,981 | 266 | 181 | 10.9 | 1.47 | 1.00 |
+| Sep 13 | 20k | 373 | 3,949 | 529 | 373 | 10.6 | 1.42 | 1.00 |
+| Sep 13 | 40k | 704 | 7,609 | 1,300 | 704 | 10.8 | 1.85 | 1.00 |
+| Sep 13 | 60k | 1,037 | 11,328 | 1,874 | 1,037 | 10.9 | 1.81 | 1.00 |
+| Sep 13 | 80k | 1,374 | 15,001 | 2,305 | 1,374 | 10.9 | 1.68 | 1.00 |
+| Sep 13 | 100k | 1,741 | 18,678 | 2,766 | 1,741 | 10.7 | 1.59 | 1.00 |
+
+- **P3 sits exactly on the nonce floor in 9 of 12 super-blocks,** and within
+  1.18x in the other three. At full scale the critical path under P3 is
+  simply the busiest sender's transaction count.
+- **P1 stays about 10–14x worse than P3 at every size,** with 4.8–5.4
+  transactions per level, against 46–65 for P3.
+
+### Batch shape: what keeps an executor busy
+
+| Day | Target | Policy | Tx per level | Levels with < 32 tx | Share of tx in level 0 | Median level size |
+|---|---|---|---|---|---|---|
+| Sep 1 | 10k | P3 | 45.8 | 80.6% | 38.8% | 4 |
+| Sep 1 | 100k | P1 | 4.8 | 99.5% | 6.6% | 3 |
+| Sep 1 | 100k | P2 | 45.9 | 61.9% | 10.4% | 23 |
+| Sep 1 | 100k | P3 | 57.8 | 64.3% | 25.7% | 22 |
+| Sep 13 | 100k | P3 | 57.5 | 68.2% | 23.3% | 18 |
+
+- **Most levels are too small to keep many workers busy.** Under P3, 64–81%
+  of levels hold fewer than 32 transactions at every size. The average of
+  about 58 transactions per level comes from a few huge levels: level 0 alone
+  holds 23–39% of the super-block.
+- **A 32-wide executor would run below capacity on most levels.** The
+  long, thin tail is the nonce chain, one transaction per level per busy
+  sender.
+
+### Sequential timings
+
+All times are in ms.
+
+| Day | Target | Policy | Extract | Sort | Detect | CSR | Level | Total |
+|---|---|---|---|---|---|---|---|---|
+| Sep 1 | 10k | P3 | 0.65 | 3.49 | 0.30 | 0.50 | 0.08 | 5.02 |
+| Sep 1 | 40k | P3 | 2.72 | 15.82 | 1.13 | 2.60 | 0.34 | 22.61 |
+| Sep 1 | 100k | P1 | 2.57 | 17.84 | 1.49 | 9.46 | 0.74 | 32.18 |
+| Sep 1 | 100k | P2 | 6.98 | 41.73 | 3.18 | 15.11 | 1.01 | 68.21 |
+| Sep 1 | 100k | P3 | 6.66 | 41.64 | 2.72 | 7.81 | 0.88 | 59.67 |
+| Sep 13 | 100k | P3 | 6.77 | 41.58 | 2.67 | 7.92 | 0.80 | 59.66 |
+
+- **Total time grows linearly with size,** about 0.6 ms per 1,000
+  transactions under P3, roughly 1.7M transactions per second on one core.
+- **Sorting takes 60–70% of the time** at every size and policy. Building
+  the CSR is second (sorting and deduplicating edges); detection and
+  levelling together are under 10%.
+- **The parallel phases should focus on the sort first.** Levelling is the
+  cheapest stage sequentially but is the one that needs a different
+  algorithm in parallel.
+
+### Fairness notes for Phases 7–8
+
+- **Account for any change of algorithm.** The sequential sort is
+  comparison-based `std::sort`. If the OpenMP or CUDA versions use a radix
+  sort, part of the speedup comes from the algorithm, not the hardware. Report
+  it against a sequential radix sort too, or state the change of algorithm.
+- **Account for frontier-based levelling.** It does more total work than the
+  sequential sweep, and that also has to be reported.
+- **Take the final timings on the Linux GPU machine.** The M2 mixes
+  performance and efficiency cores, so these sequential numbers are for
+  development only; the final comparison needs CPU and GPU on one machine.

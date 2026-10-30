@@ -23,8 +23,15 @@ Definitions (the contract every later phase must satisfy):
 
 The three parts - edges(), levels(), validate() - share nothing except
 conflicts(), so a bug in one cannot hide a bug in another.
+
+validate_fast() checks the same validity condition in O(N log N) for
+super-blocks too large for the O(n^2) validator (Phase 5). It is a different
+algorithm from both validate() and the C++ reduced edge rule, and the tests
+require it to agree with validate().
 """
 import numbers
+
+import numpy as np
 
 from access_sets import COMMUTATIVE, READ, WRITE
 
@@ -143,6 +150,75 @@ def validate(access, level, limit=10):
     if count > len(bad):
         bad.append((None, None, None, f"... {count - len(bad)} more"))
     return count == 0, bad
+
+
+def validate_fast(sets, level, limit=10):
+    """validate() for large inputs. `sets` is an AccessSets (or anything with
+    offsets/keys/modes arrays) or a list of access lists.
+
+    Per key, in block order, keep a running maximum level for each mode over
+    the key's earlier accesses. A READ must sit above the earlier WRITE and
+    COMMUTATIVE maxima, a COMMUTATIVE above READ and WRITE, a WRITE above all
+    three. That is every conflicting pair, without enumerating pairs.
+    Returns (ok, violations); each violation is (tx, key, reason)."""
+    if isinstance(sets, list):
+        offsets = np.zeros(len(sets) + 1, np.int64)
+        offsets[1:] = np.cumsum([len(a) for a in sets])
+        keys = np.array([k for a in sets for k, _ in a], np.uint64)
+        modes = np.array([m for a in sets for _, m in a], np.uint8)
+    else:
+        offsets, keys, modes = sets.offsets, sets.keys, sets.modes
+    n = len(offsets) - 1
+
+    if len(level) != n:
+        return False, [(None, None, f"{len(level)} levels for {n} transactions")]
+    lv_all = np.asarray(level)
+    if lv_all.dtype.kind not in "iu":
+        for i, lv in enumerate(level):
+            if not isinstance(lv, numbers.Integral) or isinstance(lv, bool) or lv < 0:
+                return False, [(i, None, f"level {lv!r} is not an int >= 0")]
+        lv_all = np.asarray(level, np.int64)
+    if n and lv_all.min() < 0:
+        i = int(np.argmin(lv_all))
+        return False, [(i, None, f"level {int(lv_all[i])} is not an int >= 0")]
+    if len(keys) == 0:
+        return True, []
+
+    tx = np.repeat(np.arange(n, dtype=np.int64), np.diff(offsets))
+    order = np.lexsort((tx, keys))
+    k, t, m = keys[order], tx[order], modes[order]
+    lv = lv_all[t].astype(np.int64)
+
+    new_key = np.ones(len(k), bool)
+    new_key[1:] = k[1:] != k[:-1]
+    if np.any(~new_key & (t == np.roll(t, 1))):
+        raise ValueError("a transaction lists a key more than once")
+    # Offset each key group by group_id * big so one global running maximum
+    # never carries a value from one key into the next.
+    big = int(lv.max()) + 2
+    base = (np.cumsum(new_key) - 1) * big
+
+    def earlier_max(mode):
+        """1 + the highest level among earlier accesses of `mode` to the
+        same key; 0 if there is none."""
+        v = base + np.where(m == mode, lv + 1, 0)
+        run = np.maximum.accumulate(v)
+        prev = np.empty_like(run)
+        prev[0] = -1
+        prev[1:] = run[:-1]
+        return np.maximum(prev - base, 0)
+
+    e_r, e_c, e_w = earlier_max(READ), earlier_max(COMMUTATIVE), earlier_max(WRITE)
+    need = np.where(m == READ, np.maximum(e_w, e_c),
+                    np.where(m == COMMUTATIVE, np.maximum(e_r, e_w),
+                             np.maximum(np.maximum(e_r, e_c), e_w)))
+    bad = np.flatnonzero(lv < need)
+    out = [(int(t[i]), int(k[i]),
+            f"level {int(lv[i])} not above earlier conflicting level {int(need[i]) - 1}")
+           for i in bad[:limit]]
+    if len(bad) > limit:
+        out.append((None, None, f"... {len(bad) - limit} more"))
+    return len(bad) == 0, out
 
 
 # ---- whole pipeline -------------------------------------------------------------

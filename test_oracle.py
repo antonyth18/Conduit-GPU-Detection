@@ -10,6 +10,7 @@ from access_sets import COMMUTATIVE as C, FLAG_DECODED, READ as R, WRITE as W, i
 from compare import compare
 from oracle import (
     access_lists, batch_sizes, conflicts, critical_path, edges, run, validate,
+    validate_fast,
 )
 from test_access_sets import ALICE, BOB, CAROL, OTHER, PLAIN, SELS, TRANSFER, USDT, make
 
@@ -125,6 +126,67 @@ class Validator(unittest.TestCase):
         self.assertFalse(ok)
         self.assertEqual(len(bad), 3)
         self.assertIn("8 more", bad[-1][3])
+
+
+class ValidateFast(unittest.TestCase):
+    """validate_fast must agree with the brute-force validator."""
+    acc = Validator.acc
+
+    def agree(self, acc, lv):
+        self.assertEqual(validate_fast(acc, lv)[0], validate(acc, lv)[0], (acc, lv))
+
+    def test_validator_cases(self):
+        for lv in ([0, 1, 0, 0, 1], [0, 1, 5, 5, 3], [0, 0, 0, 0, 1], [1, 0, 0, 0, 2],
+                   [0] * 5, [0, 1, 0, 0], [0, 1, 0, 0, -1]):
+            self.agree(self.acc, lv)
+
+    def test_accepts_numpy_levels(self):
+        lv = np.array(run(self.acc)["levels"], dtype=np.int32)
+        self.assertTrue(validate_fast(self.acc, lv)[0])
+
+    def test_rejects_commutative_against_read(self):
+        acc = [[(1, C)], [(1, C)], [(1, R)]]
+        self.assertTrue(validate_fast(acc, [0, 0, 1])[0])
+        self.assertFalse(validate_fast(acc, [0, 1, 1])[0])
+        self.assertFalse(validate_fast(acc, [1, 0, 0])[0])
+
+    def test_random_schedules(self):
+        rng = np.random.default_rng(7)   # fixed seed: deterministic
+        modes = (R, C, W)
+        for _ in range(300):
+            n = int(rng.integers(1, 12))
+            acc = []
+            for _ in range(n):
+                ks = rng.choice(5, size=int(rng.integers(0, 4)), replace=False)
+                acc.append([(int(k), modes[int(rng.integers(3))]) for k in ks])
+            good = run(acc)["levels"]
+            self.agree(acc, good)
+            self.agree(acc, [int(x) for x in rng.integers(0, 4, size=n)])
+            self.agree(acc, [0] * n)
+
+    def test_oracle_slices(self):
+        """On the Phase 4 reference outputs: true levels pass, a broken copy fails."""
+        from pathlib import Path
+        from access_sets import Selectors, load_corpus
+        from superblocks import SuperBlocks
+        ref = Path(__file__).parent / "oracle_ref"
+        files = sorted(ref.glob("*_500_*.npz")) if ref.exists() else []
+        if not files:
+            self.skipTest("needs oracle_ref/ (run report_oracle.py)")
+        sb = SuperBlocks()
+        sels = Selectors(load_corpus()[3])
+        for f in files:
+            z = np.load(f)
+            tx = np.array(sb.tx[int(z["tx_start"]):int(z["tx_start"]) + int(z["n"])])
+            sets = infer(tx, str(z["policy"]), sels)
+            lv = z["levels"]
+            self.assertTrue(validate_fast(sets, lv)[0], f.name)
+            if len(z["edges"]):
+                i, j = z["edges"][0]
+                broken = lv.copy()
+                broken[j] = broken[i]
+                self.assertFalse(validate_fast(sets, broken)[0], f.name)
+                self.assertFalse(validate(access_lists(sets), broken)[0], f.name)
 
 
 class Harness(unittest.TestCase):

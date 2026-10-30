@@ -2,3 +2,5 @@ data/
 corpus/
 __pycache__/
 oracle_ref/
+build/
+xcheck/
