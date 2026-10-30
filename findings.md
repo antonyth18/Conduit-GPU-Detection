@@ -4,6 +4,19 @@ Running log of results for the Ethereum parallelism study. Each phase appends
 its numbers and the caveats that bound them. Figures are reproducible with the
 script named in each section.
 
+## Corrections log
+
+Earlier claims that later phases revised. The original text stays in its
+section with a **Correction** note beside it, so the history remains readable.
+
+| # | Claim | Made in | Corrected in | What the larger sample shows |
+|---|---|---|---|---|
+| C1 | "P3 sits exactly on the nonce floor in 9 of 12 super-blocks … at full scale the critical path under P3 is simply the busiest sender's transaction count." | Phase 5 | Phase 6 | Across all 736 super-blocks, P3 is exactly on the floor in **62% on Sep 13 and 37% on Sep 1**. Sep 1's tail reaches 3.7x the floor at p95 and 25.9x at the maximum. The 12 Phase 5 super-blocks were the middle sample of each day by position, not a random draw, and happened to sit on the floor. |
+| C2 | "P1 stays about 10–14x worse than P3 at every size." | Phase 5 | Phase 6 | The per-super-block median is **9.3x on Sep 1 and 11.1x on Sep 13**, with p5–p95 of 3.6–14.6x and 5.7–14.7x, and a range of 1.0–22x. "10–14x" described the 12 median super-blocks, not the distribution. |
+| C3 | "Once balance updates commute, sender nonce chains are what bound the schedule." | Phase 4 | Phase 6 | True for most super-blocks on Sep 13 but not on Sep 1. In about **95% of above-floor super-blocks on both days**, a single contract's chain of fallback WRITEs, most often a DEX router, is longer than the nonce floor and sets the critical path instead. |
+| C4 | Above-floor bursts are "mint storms". | Phase 6 (first draft) | Phase 6 | Mint-like contracts explain only the most extreme dips. The common cause is **DEX routers**: `0x68b3…fc45` alone sets the excess in 159 super-blocks. |
+| C5 | "A policy can't do better than [the ~65x bound]" (Phase 3 key finding). | Phase 3 | Phase 6 (refinement, not a reversal) | The bound held in all 2,208 runs. But it is not always *reached*: P3's median parallelism is 45–48x on Sep 1 and 58–64x on Sep 13, against a bound of ~61–69x. |
+
 ## Phase 1 — Corpus
 
 Source: BigQuery exports, two days of Ethereum mainnet. Built by `ingest.py`, checked by
@@ -203,6 +216,11 @@ k under every policy, P3 included. That gives:
   the gap between P2 and P3 will be small, and the hottest remaining constraint
   is a protocol rule (nonce order), not state contention.
 
+> **Refinement (Phase 6, see C5).** The bound held in all 2,208 runs, but it is
+> a ceiling, not a prediction. P3 reaches a median of 45–48x on Sep 1 and
+> 58–64x on Sep 13. On Sep 1 especially, fallback chains on DEX-router
+> contracts hold the critical path above the nonce floor.
+
 ## Phase 4 — Correctness oracle
 
 Built by `oracle.py` and `compare.py`; numbers from `report_oracle.py`; tests in
@@ -267,6 +285,10 @@ Edges and average parallelism (n ÷ critical path) at n = 2,000:
   floor under any policy. Under P3 it sits at 1.00–1.35x the floor, exactly
   on it in 3 of 6 slices. Once balance updates commute, sender nonce chains
   are what bound the schedule.
+  > **Correction (Phase 6, see C3).** This generalised from 6 small slices.
+  > Across all super-blocks, the nonce floor sets the P3 critical path in most
+  > Sep 13 super-blocks but in fewer than half of Sep 1's. Elsewhere a single
+  > contract's fallback WRITE chain, usually a DEX router, is longer.
 - **Policy precision matters a lot.** P1's critical path is 9–17x longer than
   P3's, and P1 extracts only 4.5–6x average parallelism. P2 removes most of
   that gap. P3 then roughly halves P2's critical path again on Sep 1, and on
@@ -379,8 +401,18 @@ longest single-sender chain.
 - **P3 sits exactly on the nonce floor in 9 of 12 super-blocks,** and within
   1.18x in the other three. At full scale the critical path under P3 is
   simply the busiest sender's transaction count.
+  > **Correction (Phase 6, see C1).** True of these 12 super-blocks, not of
+  > the population. They were the middle sample of each day and size by
+  > position, not chosen by outcome, and they happened to fall on the floor.
+  > Across all 736 super-blocks, P3 is exactly on the floor in 62% on Sep 13
+  > and 37% on Sep 1. The ratio's p95 is 1.86x on Sep 13 and 3.69x on Sep 1,
+  > and the maximum is 25.9x.
 - **P1 stays about 10–14x worse than P3 at every size,** with 4.8–5.4
   transactions per level, against 46–65 for P3.
+  > **Correction (Phase 6, see C2).** Measured per super-block across all
+  > 736, P3's advantage over P1 has a median of 9.3x on Sep 1 and 11.1x on
+  > Sep 13, a p5–p95 of 3.6–14.7x, and a full range of 1.0–22x. At the low
+  > end, one hot contract serialises both policies alike.
 
 ### Batch shape: what keeps an executor busy
 
@@ -433,3 +465,229 @@ All times are in ms.
 - **Take the final timings on the Linux GPU machine.** The M2 mixes
   performance and efficiency cores, so these sequential numbers are for
   development only; the final comparison needs CPU and GPU on one machine.
+
+## Phase 6 — Question A: how much parallelism is in real Ethereum blocks?
+
+The verified sequential C++ pipeline was run on **all 736 super-blocks under
+all three policies: 2,208 runs.**
+
+- **Scripts:** `measure_parallelism.py` runs the sweep and validates every run;
+  `report_parallelism.py` produces the statistics and figures.
+- **Data:** `results/phase6_runs.csv` has one row per run;
+  `results/phase6_validation.csv` has each run's validator verdict.
+- **Results:** `results/phase6_summary.md` has the full tables; the figures are
+  `results/fig_parallelism_vs_size.png`, `results/fig_floor_ratio.png` and
+  `results/fig_bursts.png`.
+
+Parallelism means transactions ÷ levels: the average number of transactions
+that can run at once. Super-blocks remain a modelling decision: consecutive
+real blocks concatenated in their original order.
+
+**Every result rests on a verified schedule.**
+- The fast validator accepted all 2,208 schedules.
+- No critical path was below the nonce floor.
+- Output was identical across repeated runs.
+- No edges came from READ↔COMMUTATIVE run transitions, as predicted.
+
+### Headline
+
+**Slot-level inference (P2) finds about 8x more parallelism than
+contract-level (P1); treating balance updates as commutative (P3) adds
+about 1.25x more.** Medians across all super-blocks of a day:
+
+| Day | P1 contract | P2 slot | P3 commutative | P3 ÷ P1 per super-block (median; p5–p95) |
+|---|---|---|---|---|
+| Sep 1 (Tue) | 5.0–5.2x | 35–40x | 45–48x | 9.3 (3.6–14.6) |
+| Sep 13 (Sun) | 5.4–5.5x | 44–49x | 58–64x | 11.1 (5.7–14.7) |
+
+- **P1 is stable and low.** At 5x with a tight spread, contract-level
+  granularity hides almost all of the available parallelism.
+- **The extra gain from P3 over P2 is modest for a typical super-block**
+  (median 1.23x on Sep 1, 1.26x on Sep 13), but it reaches 4–19x on
+  super-blocks where many transfers hit the same balance.
+- **The Sunday had more parallelism than the Tuesday** under P2 and P3 (about
+  60 vs 47 under P3). With only two days this can't be attributed to the
+  weekday.
+
+### Invariance to batch size
+
+**The median parallelism is flat from 10k to 100k transactions.** Bigger
+batches add work but not parallelism.
+
+The elasticity in the table is the slope of log(parallelism) against
+log(batch size) across all super-blocks of a day. 0 means flat; 1 would mean
+parallelism grows in proportion to batch size.
+
+| Day | Policy | Median at 10k | Median at 100k | 100k ÷ 10k | Elasticity |
+|---|---|---|---|---|---|
+| Sep 1 | P1 | 5.1 | 5.0 | 0.99 | +0.003 |
+| Sep 1 | P2 | 35.4 | 39.7 | 1.12 | +0.051 |
+| Sep 1 | P3 | 44.6 | 47.3 | 1.06 | +0.030 |
+| Sep 13 | P1 | 5.5 | 5.4 | 0.98 | −0.005 |
+| Sep 13 | P2 | 43.5 | 47.5 | 1.09 | +0.071 |
+| Sep 13 | P3 | 58.3 | 63.6 | 1.09 | +0.057 |
+
+- **A tenfold larger batch gains at most 12%.** That is consistent with the
+  Phase 3 prediction: the busiest sender's share of the batch, and so the nonce
+  floor, scales with it.
+- **The spread narrows as batches grow.** Under P3 the 5th percentile rises
+  from 17.5x to 24.2x on Sep 1 and from 33.9x to 53.5x on Sep 13. Larger
+  batches don't raise the typical parallelism; they dilute the bursts.
+
+### The nonce floor
+
+Critical path ÷ the longest single-sender chain in the same super-block:
+
+| Day | Policy | Median | p5 | p95 | Max | Exactly on the floor | Within 5% |
+|---|---|---|---|---|---|---|---|
+| Sep 1 | P1 | 13.35 | 4.53 | 24.71 | 31.82 | 0% | 0% |
+| Sep 1 | P2 | 1.81 | 1.08 | 6.82 | 25.88 | 1.2% | 3.3% |
+| Sep 1 | P3 | 1.11 | 1.00 | 3.69 | 25.88 | 37.4% | 43.5% |
+| Sep 13 | P1 | 11.95 | 7.63 | 18.89 | 24.88 | 0% | 0% |
+| Sep 13 | P2 | 1.38 | 1.05 | 2.43 | 5.85 | 3.2% | 4.8% |
+| Sep 13 | P3 | 1.00 | 1.00 | 1.86 | 5.85 | 62.4% | 66.2% |
+
+### Correction to Phase 5: the floor binds less often than reported
+
+Phase 5 reported that P3 sits exactly on the nonce floor in 9 of 12
+super-blocks, and that "at full scale the critical path under P3 is simply the
+busiest sender's transaction count". **That does not hold for the full
+sample.**
+
+| | Phase 5 (12 median super-blocks) | Phase 6 (all 736 super-blocks) |
+|---|---|---|
+| P3 exactly on the floor | 9 of 12 (75%) | Sep 13: 62.4%; Sep 1: 37.4% |
+| P3 within 5% of the floor | 9 of 12 | Sep 13: 66.2%; Sep 1: 43.5% |
+| P3 critical path ÷ floor, worst case | 1.18 | 25.9 |
+| P3 ÷ P1 parallelism | "about 10–14x" | median 9.3x on Sep 1 and 11.1x on Sep 13; p5–p95 3.6–14.7x; range 1.0–22x |
+
+**Why Phase 5 was misleading.** It reported one super-block per day and size:
+the middle one by position in the day, not a random or representative draw.
+Twelve points can't show a distribution whose tail sits 26x above the floor.
+That is why this phase reports distributions over every super-block.
+
+**What changes in the conclusion.**
+- **Sep 13:** the nonce floor is the dominant limit for P3, as Phase 5 said.
+- **Sep 1:** it is the limit in only about two-fifths of super-blocks. In
+  most of the rest, a single contract's fallback chain is longer (next
+  section).
+
+**One sender sets the floor in most super-blocks.**
+`0x559432e18b281731c054cd703d4b49872be4ed53` is the busiest sender in 498 of
+the 736 super-blocks (67.7%). No other sender exceeds 6.2%.
+
+### What holds P3 above the floor: fallback chains on one contract, mostly DEX routers
+
+For every P3 super-block, we compared the longest chain of WRITEs on a
+single ACCOUNT key with the nonce floor. Under P3, a chain like that can
+only come from fallback (undecoded) calls to one contract. The comparison is
+a count, not a trace of the critical path.
+
+| Day | Super-blocks more than 5% above the floor | Of those, a single-contract chain longer than the floor |
+|---|---|---|
+| Sep 1 | 240 of 425 (56.5%) | 228 (95.0%) |
+| Sep 13 | 105 of 311 (33.8%) | 100 (95.2%) |
+
+The contracts whose chain sets the excess most often:
+
+| Contract | Above-floor super-blocks |
+|---|---|
+| `0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45` (Uniswap SwapRouter02) | 159 |
+| `0x4cd00e387622c35bddb9b4c962c136462338bc31` | 46 |
+| `0x278d858f05b94576c1e6f73285886876ff6ef8d2` | 39 |
+| `0x7a250d5630b4cf539739df2c5dacb4c659f2488d` (Uniswap V2 Router02) | 23 |
+| `0x51c72848c68a965f66fa7a88855f9f7784502a7f` | 16 |
+| `0x8cc5c24a1666d3214340050315b82b2b6b0d9027` | 15 |
+| `0x00005ea00ac477b1030ce78506496e8c2de24bf5` (likely SeaDrop; unverified) | 9 |
+
+**The second limit is a granularity artifact, and its direction is known.**
+
+- Under P2 and P3 a router call is undecoded, so it WRITEs the whole router
+  account. Every swap through the router then joins one serial chain.
+- **Routers keep almost no per-swap state.** Real conflicts between swaps are
+  on the liquidity pools they touch, which is internal-call state we can't see.
+  Swaps through different pools don't conflict.
+- So the router chain overstates conflicts between swaps on different pools.
+  But because internal calls are invisible, it can't be replaced by the true
+  pool-level chain from this data.
+
+**Treat above-floor P3 numbers as pessimistic about routers.** Decoding router
+calldata to recover the pool addresses is the clearest next step for
+tightening Question A.
+
+### Extreme bursts: mint storms, also measured at P1 granularity
+
+The deepest dips, below about 13x parallelism under P3, come from a different
+fallback pattern: hundreds to thousands of distinct senders calling one
+contract with one selector.
+
+| Super-block | P3 parallelism | P3 levels | Floor | Cause |
+|---|---|---|---|---|
+| `2026-09-01/10k/179` | 5.7x | 1,786 | 69 | 1,786 calls to `0x062bd962fad2cf6df9ab91d6a41f55c1c20da298` from 1,775 senders, selector `0x4a21a2df` |
+| `2026-09-01/20k/090` | 8.8x | 2,303 | 129 | the same contract, 2,303 calls |
+| `2026-09-13/10k/085` | 10.1x | 995 | 170 | 995 calls to `0x00005ea00ac477b1030ce78506496e8c2de24bf5` from 903 senders, selector `0x161ac21f` |
+| `2026-09-01/10k/049` | 12.3x | 821 | 119 | 821 calls to the same `0x0000…4bf5` contract, selector `0x4b61cd6f` |
+
+- **These bursts are assumed, not measured.** A fallback call WRITEs the whole
+  contract, so these super-blocks are measured at P1 granularity, and every
+  call to the contract becomes one serial chain.
+- **The pattern looks like NFT mints, but this is unconfirmed.** I believe
+  `0x0000…4bf5` is OpenSea's SeaDrop contract; that should be checked on a
+  block explorer before it is cited.
+- **Real mints do share some state,** such as a supply counter, but the
+  serial chain is an upper bound on their conflicts.
+- **These bursts are the most extreme cases, not the most common.**
+  Correction to this phase's first draft (see C4): router fallback chains
+  (previous section) affect far more super-blocks. Mint storms explain only
+  the deepest dips.
+
+`fig_bursts.png` shows bursts as short, deep dips through both days, while P1
+stays flat near 5x throughout.
+
+### Batch shape
+
+| Day | Target | Policy | Levels with < 32 tx | Share of tx in level 0 | Median level size |
+|---|---|---|---|---|---|
+| Sep 1 | 10k | P3 | 80.4% | 39.7% | 5 |
+| Sep 1 | 100k | P3 | 79.0% | 27.7% | 12 |
+| Sep 13 | 10k | P3 | 73.4% | 37.8% | 9 |
+| Sep 13 | 100k | P3 | 61.9% | 25.2% | 24 |
+| Both | any | P1 | ≥ 98.6% | 6–16% | 2–3 |
+
+These are medians across super-blocks; `phase6_summary.md` has P2 as well.
+
+- **Even under P3, 62–80% of levels hold fewer than 32 transactions.**
+- **Level 0 holds a quarter to two-fifths of each super-block.**
+- **A wide executor would be busy only briefly:** at the start, then for a long
+  tail of narrow levels.
+
+### Answer to Question A
+
+On these two days of mainnet traffic, real Ethereum batches offer about
+**5x parallelism at contract granularity, 35–49x at slot granularity, and
+45–64x with commutative balances** (medians). The figure is flat across batch
+sizes from 10k to 100k. Contract-level inference understates the parallelism
+by about 9–11x per super-block (median).
+
+Under P3, two limits set the critical path (corrected from Phase 5's "simply
+the busiest sender's nonce chain"; see C1 and C3):
+
+1. **The busiest sender's nonce chain** is a protocol rule that holds under
+   every policy. It is the binding limit in 62–66% of Sep 13 super-blocks and
+   37–44% of Sep 1's.
+2. **Fallback chains on a single contract**, mostly DEX routers (Uniswap
+   SwapRouter02 in 159 super-blocks), account for about 95% of the rest.
+   These are a granularity artifact: undecoded router calls WRITE the whole
+   router account.
+
+The two remaining bounds on the result:
+- **Internal calls are invisible,** which makes every figure here an upper
+  bound.
+- **About a third of transactions fall back to P1.** That makes the router
+  chains and mint-storm bursts pessimistic: a lower bound on parallelism in
+  the super-blocks they dominate.
+
+These two biases point in opposite directions, so neither can be assumed to
+cancel the other. The next step that would most tighten the answer is
+decoding router calldata to recover pool addresses. That would also close
+the gap between P3's measured median and the ~65x nonce bound.

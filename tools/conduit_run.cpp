@@ -2,11 +2,16 @@
 // --runs after --warmup discarded runs), schedule statistics, and optionally
 // a dump of the output for tools/verify_cpp.py.
 //
-//   conduit_run [--policy P1|P2|P3|all] (--id ID ... | --median) [--limit N]
-//               [--runs 7] [--warmup 2] [--dump DIR] [--corpus DIR] [--manifest PATH]
+//   conduit_run [--policy P1|P2|P3|all] (--id ID ... | --median | --all)
+//               [--date D] [--target T] [--limit N] [--runs 7] [--warmup 2]
+//               [--dump DIR] [--csv FILE] [--quiet] [--corpus DIR] [--manifest PATH]
 //
 // --median picks each day's median super-block at every target size.
+// --all picks every super-block, optionally filtered by --date / --target.
 // --limit N keeps the first N transactions (may split a block; for oracle slices).
+// --csv appends one row per (super-block, policy), writing a header if the
+// file is new. Level-size percentiles use nearest rank on the sorted sizes:
+// pQ = sizes[floor(Q/100 * (L - 1))].
 //
 // Dump format (little-endian), one file per (super-block, limit, policy):
 //   "CDXP" | u32 version=1 | u32 policy (1..3) | u32 n | u64 tx_start | u64 m |
@@ -80,7 +85,9 @@ int main(int argc, char** argv) {
     std::string corpus_dir = "corpus", manifest_path = "superblocks.json", policy_arg = "all";
     std::string dump_dir;
     std::vector<std::string> ids;
-    bool use_median = false;
+    bool use_median = false, use_all = false, quiet = false;
+    std::string csv_path, date_filter;
+    uint32_t target_filter = 0;
     size_t limit = 0;
     int runs = 7, warmup = 2;
     for (int i = 1; i < argc; ++i) {
@@ -94,15 +101,21 @@ int main(int argc, char** argv) {
         else if (a == "--policy") policy_arg = next();
         else if (a == "--id") ids.push_back(next());
         else if (a == "--median") use_median = true;
+        else if (a == "--all") use_all = true;
+        else if (a == "--date") date_filter = next();
+        else if (a == "--target") target_filter = uint32_t(std::stoul(next()));
+        else if (a == "--csv") csv_path = next();
+        else if (a == "--quiet") quiet = true;
         else if (a == "--limit") limit = std::stoul(next());
         else if (a == "--runs") runs = std::stoi(next());
         else if (a == "--warmup") warmup = std::stoi(next());
         else if (a == "--dump") dump_dir = next();
         else { std::cerr << "unknown argument " << a << "\n"; return 2; }
     }
-    if (ids.empty() == !use_median || runs < 1 || warmup < 0) {
-        std::cerr << "usage: conduit_run (--id ID ... | --median) [--policy P|all] [--limit N]"
-                     " [--runs R] [--warmup W] [--dump DIR]\n";
+    if (int(!ids.empty()) + int(use_median) + int(use_all) != 1 || runs < 1 || warmup < 0) {
+        std::cerr << "usage: conduit_run (--id ID ... | --median | --all) [--date D] [--target T]"
+                     " [--policy P|all] [--limit N] [--runs R] [--warmup W] [--dump DIR]"
+                     " [--csv FILE] [--quiet]\n";
         return 2;
     }
 
@@ -119,14 +132,36 @@ int main(int argc, char** argv) {
                     auto es = manifest.entries(date, t);
                     chosen.push_back(es[es.size() / 2]);
                 }
+        if (use_all)
+            for (const auto& s : manifest.superblocks)
+                if ((date_filter.empty() || s.date == date_filter) &&
+                    (!target_filter || s.target == target_filter))
+                    chosen.push_back(&s);
+
+        std::FILE* csv = nullptr;
+        if (!csv_path.empty()) {
+            std::FILE* probe = std::fopen(csv_path.c_str(), "rb");
+            bool fresh = !probe || std::fgetc(probe) == EOF;
+            if (probe) std::fclose(probe);
+            csv = std::fopen(csv_path.c_str(), "ab");
+            if (!csv) throw std::runtime_error("cannot open " + csv_path);
+            if (fresh)
+                std::fputs("id,date,target,sample,tx_start,n,policy,records,edges,emitted,"
+                           "read_comm_edges,levels,floor,floor_sender,lv_min,lv_p5,lv_median,"
+                           "lv_p95,lv_max,levels_lt32,tx_level0,t_extract_ms,t_sort_ms,"
+                           "t_detect_ms,t_csr_ms,t_level_ms,t_total_ms,deterministic\n",
+                           csv);
+        }
+        std::ostream discard(nullptr);   // no buffer: output is dropped
+        std::ostream& out = quiet ? discard : std::cout;
 
         std::vector<Policy> policies;
         if (policy_arg == "all") policies = {Policy::P1, Policy::P2, Policy::P3};
         else policies = {parse_policy(policy_arg)};
 
-        std::cout << "sequential C++ pipeline, single-threaded; times are medians of " << runs
+        out << "sequential C++ pipeline, single-threaded; times are medians of " << runs
                   << " runs after " << warmup << " warm-up runs (ms)\n\n";
-        std::cout << std::left << std::setw(26) << "super-block" << std::right << std::setw(4)
+        out << std::left << std::setw(26) << "super-block" << std::right << std::setw(4)
                   << "pol" << std::setw(8) << "n" << std::setw(9) << "records" << std::setw(10)
                   << "edges" << std::setw(5) << "R-C" << std::setw(7) << "levels" << std::setw(7)
                   << "floor" << std::setw(7) << "lv/fl" << std::setw(8) << "tx/lv" << std::setw(7)
@@ -176,7 +211,7 @@ int main(int argc, char** argv) {
                 std::ostringstream label;
                 label << sb->id;
                 if (n != sb->tx_count) label << "[:" << n << "]";
-                std::cout << std::left << std::setw(26) << label.str() << std::right
+                out << std::left << std::setw(26) << label.str() << std::right
                           << std::setw(4) << policy_name(p) << std::setw(8) << n << std::setw(9)
                           << last.records << std::setw(10) << last.graph.num_edges()
                           << std::setw(5) << last.stats.read_comm_edges << std::setw(7) << L
@@ -191,7 +226,25 @@ int main(int argc, char** argv) {
                           << median(td) << std::setw(7) << median(tc) << std::setw(7)
                           << median(tl) << std::setw(8) << median(tt) << std::setw(6)
                           << (deterministic ? "yes" : "NO") << "\n";
-                std::cout.unsetf(std::ios::fixed);
+                out.unsetf(std::ios::fixed);
+
+                if (csv) {
+                    auto pct = [&](double q) {
+                        return sorted_sizes[size_t(q * (sorted_sizes.size() - 1))];
+                    };
+                    std::fprintf(csv,
+                                 "%s,%s,%u,%u,%llu,%zu,%s,%zu,%llu,%llu,%llu,%u,%u,%u,%u,%u,%u,"
+                                 "%u,%u,%zu,%u,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%d\n",
+                                 sb->id.c_str(), sb->date.c_str(), sb->target, sb->sample,
+                                 (unsigned long long)sb->tx_start, n, policy_name(p),
+                                 last.records, (unsigned long long)last.graph.num_edges(),
+                                 (unsigned long long)last.stats.emitted,
+                                 (unsigned long long)last.stats.read_comm_edges, L, floor, sender,
+                                 sorted_sizes.front(), pct(0.05), pct(0.5), pct(0.95),
+                                 sorted_sizes.back(), small, sizes[0], median(te), median(ts),
+                                 median(td), median(tc), median(tl), median(tt),
+                                 deterministic ? 1 : 0);
+                }
 
                 if (!dump_dir.empty()) {
                     std::ostringstream path;
@@ -202,6 +255,7 @@ int main(int argc, char** argv) {
                 }
             }
         }
+        if (csv) std::fclose(csv);
     } catch (const std::exception& e) {
         std::cerr << "error: " << e.what() << "\n";
         return 1;
