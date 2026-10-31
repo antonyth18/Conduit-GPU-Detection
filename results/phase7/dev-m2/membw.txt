@@ -1,0 +1,6 @@
+triad over 3 x 179 MB arrays
+threads  1  best 57.7 GB/s  (check 7.0)
+threads  2  best 71.2 GB/s  (check 7.0)
+threads  4  best 71.4 GB/s  (check 7.0)
+threads  8  best 60.3 GB/s  (check 7.0)
+threads 16  best 57.9 GB/s  (check 7.0)

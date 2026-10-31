@@ -13,6 +13,7 @@
 
 #include "conduit/json.hpp"
 #include "conduit/pipeline.hpp"
+#include "conduit/radix.hpp"
 #include "conduit/sha256.hpp"
 
 using namespace conduit;
@@ -353,6 +354,184 @@ TEST(pipeline_is_deterministic) {
         CHECK(a.levels == b.levels);
         CHECK(a.graph.cols == b.graph.cols);
         CHECK(a.graph.row_offsets == b.graph.row_offsets);
+    }
+}
+
+// ---- Phase 7: radix sorts, OpenMP stages, parallel levelling ----------------------
+
+namespace {
+uint64_t lcg_state = 987654321;
+uint64_t lcg(uint64_t m) {
+    lcg_state = lcg_state * 6364136223846793005ull + 1442695040888963407ull;
+    return (lcg_state >> 33) % m;
+}
+
+// records as extraction emits them: tx ascending, keys unique within a tx
+std::vector<Record> random_records(size_t n_tx, uint64_t key_space, bool wide_keys) {
+    std::vector<Record> r;
+    for (uint32_t t = 0; t < n_tx; ++t) {
+        std::vector<uint64_t> ks;
+        size_t k = 1 + lcg(6);
+        for (size_t j = 0; j < k; ++j) {
+            uint64_t key = lcg(key_space);
+            if (wide_keys) key = (key << 40) ^ (key * 0x9E3779B97F4A7C15ull);
+            if (std::find(ks.begin(), ks.end(), key) == ks.end()) ks.push_back(key);
+        }
+        std::sort(ks.begin(), ks.end());
+        for (uint64_t key : ks) r.push_back(pack(key, t, uint8_t(1u << lcg(3))));
+    }
+    return r;
+}
+
+Graph graph_of(uint32_t n, std::vector<uint64_t> edges) { return build_csr(n, edges); }
+uint64_t edge(uint32_t u, uint32_t v) { return (uint64_t(u) << 32) | v; }
+}  // namespace
+
+TEST(radix_records_equal_std_sort) {
+    for (bool wide : {false, true})
+        for (uint64_t space : {7ull, 1000ull, 1ull << 40}) {
+            std::vector<Record> a = random_records(3000, space, wide), b = a;
+            std::sort(a.begin(), a.end());
+            RadixStats st;
+            radix_sort_records_seq(b, &st);
+            CHECK(a == b);
+            CHECK(st.passes + st.skipped == 6);
+        }
+}
+
+TEST(radix_omp_equals_seq_for_every_thread_count) {
+    if (!have_openmp()) return;
+    lcg_state = 42;
+    const std::vector<Record> base = random_records(5000, 1ull << 30, true);
+    std::vector<Record> want = base;
+    radix_sort_records_seq(want);
+    for (int t : {1, 2, 3, 4, 8}) {
+        std::vector<Record> got = base;
+        radix_sort_records_omp(got, t);
+        CHECK(got == want);
+    }
+    std::vector<uint64_t> v;
+    for (int i = 0; i < 20000; ++i) v.push_back(edge(uint32_t(lcg(70000)), uint32_t(lcg(70000))));
+    std::vector<uint64_t> s1 = v, s2 = v;
+    std::sort(s1.begin(), s1.end());
+    radix_sort_u64_seq(s2);
+    CHECK(s1 == s2);
+    for (int t : {1, 2, 4, 8}) {
+        std::vector<uint64_t> s3 = v;
+        radix_sort_u64_omp(s3, t);
+        CHECK(s1 == s3);
+    }
+}
+
+TEST(parallel_detect_matches_sequential_and_brute) {
+    if (!have_openmp()) return;
+    uint64_t st = 777;
+    auto rnd = [&](uint64_t m) {
+        st = st * 6364136223846793005ull + 1442695040888963407ull;
+        return (st >> 33) % m;
+    };
+    const uint8_t modes[3] = {R, C, W};
+    for (int t = 0; t < 200; ++t) {
+        size_t n = 1 + rnd(60);
+        std::vector<Access> acc(n);
+        for (auto& a : acc) {
+            size_t k = rnd(4);
+            for (size_t j = 0; j < k; ++j) {
+                uint64_t key = rnd(8);
+                bool dup = false;
+                for (const auto& p : a) dup |= p.first == key;
+                if (!dup) a.push_back({key, modes[rnd(3)]});
+            }
+        }
+        std::vector<Record> rec = extract(make_sets(acc));
+        sort_records(rec);
+        EdgeStats s0;
+        const std::vector<uint64_t> want = detect(rec, &s0);
+        for (int th : {1, 2, 4, 8})
+            for (Schedule sc : {Schedule::Static, Schedule::Dynamic, Schedule::Guided}) {
+                EdgeStats s1;
+                std::vector<uint64_t> got = detect_omp(rec, th, sc, 4, &s1);
+                CHECK(got == want);
+                CHECK(s1.read_comm_edges == s0.read_comm_edges);
+                CHECK(s1.groups == s0.groups);
+                std::vector<uint64_t> e2 = got;
+                Graph g = build_csr_omp(uint32_t(n), e2, th);
+                CHECK(level_kahn(g, th, nullptr) == brute(acc).levels);
+            }
+    }
+}
+
+TEST(parallel_levelling_matches_sweep_on_deep_graphs) {
+    if (!have_openmp()) return;
+    std::vector<Graph> graphs;
+    std::vector<uint64_t> e;
+    for (uint32_t i = 0; i + 1 < 5000; ++i) e.push_back(edge(i, i + 1));   // chain of 5000
+    graphs.push_back(graph_of(5000, e));
+    e.clear();
+    for (uint32_t i = 1; i < 3000; ++i) e.push_back(edge(0, i));   // wide fan
+    graphs.push_back(graph_of(3000, e));
+    e.clear();
+    const uint32_t W = 60, H = 60;   // diamond lattice: right and down neighbours
+    for (uint32_t y = 0; y < H; ++y)
+        for (uint32_t x = 0; x < W; ++x) {
+            const uint32_t u = y * W + x;
+            if (x + 1 < W) e.push_back(edge(u, u + 1));
+            if (y + 1 < H) e.push_back(edge(u, u + W));
+        }
+    graphs.push_back(graph_of(W * H, e));
+    e.clear();
+    for (uint32_t i = 0; i < 4000; ++i)   // random forward DAG with long jumps
+        for (int k = 0; k < 3; ++k) {
+            uint32_t j = i + 1 + uint32_t(lcg(i % 7 == 0 ? 2000 : 20));
+            if (j < 4000) e.push_back(edge(i, j));
+        }
+    graphs.push_back(graph_of(4000, e));
+    graphs.push_back(graph_of(10, {}));   // no edges at all
+
+    for (const Graph& g : graphs) {
+        LevelStats ss;
+        const std::vector<uint32_t> want = level(g, &ss);
+        const uint32_t L = g.n ? *std::max_element(want.begin(), want.end()) + 1 : 0;
+        CHECK(ss.relaxations == g.num_edges());
+        for (int t : {1, 2, 4, 8}) {
+            LevelStats ks, bs;
+            CHECK(level_kahn(g, t, &ks) == want);
+            CHECK(level_bellman_ford(g, t, &bs) == want);
+            CHECK(ks.relaxations == g.num_edges());
+            CHECK(ks.rounds == L);
+            CHECK(bs.rounds == L);   // L - 1 rounds to converge + 1 to see no change
+            CHECK(bs.relaxations == uint64_t(L) * g.num_edges());
+        }
+    }
+}
+
+TEST(omp_pipeline_identical_across_threads) {
+    if (!have_openmp()) return;
+    std::vector<Tx> txs;
+    for (uint32_t i = 0; i < 3000; ++i)
+        txs.push_back(make_tx(i % 3 == 0 ? 0 : (i % 7 == 0 ? 4 : 1), 100 + i % 37,
+                              i % 5 == 0 ? USDT : 200 + i % 23, 300 + i % 11, ABSENT,
+                              i % 7 == 0 ? 0 : FLAG_DECODED));
+    for (Policy p : {Policy::P1, Policy::P2, Policy::P3}) {
+        const Result ref = run_pipeline(txs.data(), txs.size(), p, SELS);
+        Options sr;
+        sr.impl = Impl::SeqRadix;
+        const Result rad = run_pipeline(txs.data(), txs.size(), p, SELS, sr);
+        CHECK(rad.levels == ref.levels);
+        CHECK(rad.graph.cols == ref.graph.cols);
+        for (int t : {1, 2, 4, 8})
+            for (LevelAlgo la : {LevelAlgo::Kahn, LevelAlgo::BellmanFord}) {
+                Options o;
+                o.impl = Impl::Omp;
+                o.threads = t;
+                o.level = la;
+                const Result r = run_pipeline(txs.data(), txs.size(), p, SELS, o);
+                CHECK(r.levels == ref.levels);
+                CHECK(r.graph.cols == ref.graph.cols);
+                CHECK(r.graph.row_offsets == ref.graph.row_offsets);
+                CHECK(r.stats.emitted == ref.stats.emitted);
+                CHECK(r.records == ref.records);
+            }
     }
 }
 

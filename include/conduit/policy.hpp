@@ -76,6 +76,16 @@ struct AccessSets {
 
 uint8_t classify(const Tx& t, const Selectors& sels);
 
+// Throws if any operand id in tx[0..n) exceeds MAX_ID.
+void check_ids(const Tx* tx, size_t n);
+
+// One transaction's access set: at most MAX_TX_ACCESSES (key, mode) pairs,
+// keys ascending and unique. Shared by the sequential and parallel paths so
+// both emit exactly what was cross-checked against Python. Does not check ids.
+constexpr int MAX_TX_ACCESSES = 7;
+int tx_access(const Tx& t, Policy policy, const Selectors& sels, uint64_t keys[MAX_TX_ACCESSES],
+              uint8_t modes[MAX_TX_ACCESSES], uint8_t* category);
+
 // Throws if any operand id exceeds MAX_ID (the key layout would overflow).
 AccessSets infer(const Tx* tx, size_t n, Policy policy, const Selectors& sels);
 

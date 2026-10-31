@@ -12,7 +12,9 @@ and checks them with the Python oracle tools.
 
 Access sets for validation come from the Python policies, not the C++ port.
 
-Usage: python3 tools/verify_cpp.py   (after building build/conduit_run)
+Usage: python3 tools/verify_cpp.py [conduit_run flags...]
+Extra flags pass through to conduit_run, e.g. to verify the OpenMP pipeline:
+  python3 tools/verify_cpp.py --impl omp --threads 8 --level kahn
 """
 import struct
 import subprocess
@@ -53,8 +55,11 @@ def read_pipeline(path):
             "levels": levels, "src": src, "cols": cols}
 
 
+EXTRA = sys.argv[1:]
+
+
 def run_cpp(args, dump_dir):
-    subprocess.run([str(RUN), "--corpus", str(ROOT / "corpus"),
+    subprocess.run([str(RUN), *EXTRA, "--corpus", str(ROOT / "corpus"),
                     "--manifest", str(ROOT / "superblocks.json"),
                     "--policy", "all", "--runs", "1", "--warmup", "0",
                     "--dump", str(dump_dir)] + args,
@@ -67,6 +72,8 @@ def main():
     sb = SuperBlocks()
     sels = Selectors(load_corpus()[3])
     ok = True
+    if EXTRA:
+        print("conduit_run flags:", " ".join(EXTRA), "\n")
 
     print("1. Phase 4 slices against the oracle")
     refs = sorted(REF.glob("*.npz"))

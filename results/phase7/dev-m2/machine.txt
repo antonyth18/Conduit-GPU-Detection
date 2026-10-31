@@ -1,0 +1,20 @@
+date: 2026-10-31T09:16:38Z
+host: Antonys-MacBook-Air-3 (development machine; timings are development-only)
+uname: Darwin Antonys-MacBook-Air-3.local 23.5.0 Darwin Kernel Version 23.5.0: Wed May  1 20:19:05 PDT 2024; root:xnu-10063.121.3~5/RELEASE_ARM64_T8112 arm64
+git: 36fe46c + uncommitted Phase 7 changes
+threads swept: 1,2,4,8,16
+runs: 2 warm-up + 7 measured, median reported
+
+ProductName:		macOS
+ProductVersion:		14.5
+BuildVersion:		23F79
+Apple M2
+8
+8
+4
+4
+8589934592
+macOS: no thread pinning available (OMP_PROC_BIND has no effect on core placement)
+
+Apple clang version 16.0.0 (clang-1600.0.26.6)
+cmake version 4.4.5

@@ -5,6 +5,8 @@
 //   conduit_run [--policy P1|P2|P3|all] (--id ID ... | --median | --all)
 //               [--date D] [--target T] [--limit N] [--runs 7] [--warmup 2]
 //               [--dump DIR] [--csv FILE] [--quiet] [--corpus DIR] [--manifest PATH]
+//               [--impl seq-std|seq-radix|omp] [--threads N] [--level sweep|kahn|bf]
+//               [--schedule dynamic|static|guided]
 //
 // --median picks each day's median super-block at every target size.
 // --all picks every super-block, optionally filtered by --date / --target.
@@ -88,6 +90,8 @@ int main(int argc, char** argv) {
     bool use_median = false, use_all = false, quiet = false;
     std::string csv_path, date_filter;
     uint32_t target_filter = 0;
+    Options opts;
+    bool level_set = false;
     size_t limit = 0;
     int runs = 7, warmup = 2;
     for (int i = 1; i < argc; ++i) {
@@ -106,6 +110,10 @@ int main(int argc, char** argv) {
         else if (a == "--target") target_filter = uint32_t(std::stoul(next()));
         else if (a == "--csv") csv_path = next();
         else if (a == "--quiet") quiet = true;
+        else if (a == "--impl") opts.impl = parse_impl(next());
+        else if (a == "--threads") opts.threads = std::stoi(next());
+        else if (a == "--level") { opts.level = parse_level(next()); level_set = true; }
+        else if (a == "--schedule") opts.schedule = parse_schedule(next());
         else if (a == "--limit") limit = std::stoul(next());
         else if (a == "--runs") runs = std::stoi(next());
         else if (a == "--warmup") warmup = std::stoi(next());
@@ -119,6 +127,7 @@ int main(int argc, char** argv) {
         return 2;
     }
 
+    if (!level_set) opts.level = default_level(opts.impl);
     try {
         Corpus corpus(corpus_dir);
         Manifest manifest = load_manifest(manifest_path, corpus);
@@ -159,8 +168,11 @@ int main(int argc, char** argv) {
         if (policy_arg == "all") policies = {Policy::P1, Policy::P2, Policy::P3};
         else policies = {parse_policy(policy_arg)};
 
-        out << "sequential C++ pipeline, single-threaded; times are medians of " << runs
-                  << " runs after " << warmup << " warm-up runs (ms)\n\n";
+        out << "C++ pipeline, impl " << impl_name(opts.impl) << ", levelling "
+            << level_name(opts.level);
+        if (opts.impl == Impl::Omp) out << ", threads " << opts.threads;
+        out << "; times are medians of " << runs << " runs after " << warmup
+            << " warm-up runs (ms)\n\n";
         out << std::left << std::setw(26) << "super-block" << std::right << std::setw(4)
                   << "pol" << std::setw(8) << "n" << std::setw(9) << "records" << std::setw(10)
                   << "edges" << std::setw(5) << "R-C" << std::setw(7) << "levels" << std::setw(7)
@@ -183,7 +195,7 @@ int main(int argc, char** argv) {
                 Result first, last;
                 for (int r = 0; r < warmup + runs; ++r) {
                     Timings t;
-                    Result res = run_pipeline(tx, n, p, sels, &t);
+                    Result res = run_pipeline(tx, n, p, sels, opts, &t);
                     if (r == 0) first = res;
                     if (r >= warmup) {
                         te.push_back(t.extract * 1e3);

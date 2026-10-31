@@ -31,8 +31,6 @@ Selectors::Selectors(const std::vector<std::string>& names) {
     }
 }
 
-namespace {
-
 void check_ids(const Tx* tx, size_t n) {
     for (size_t i = 0; i < n; ++i) {
         const uint32_t ids[4] = {tx[i].frm, tx[i].to, tx[i].a1, tx[i].a2};
@@ -43,6 +41,8 @@ void check_ids(const Tx* tx, size_t n) {
                                          "; the key layout needs a wider id field");
     }
 }
+
+namespace {
 
 struct Cand {
     uint64_t key;
@@ -73,6 +73,69 @@ uint8_t classify(const Tx& t, const Selectors& sels) {
     return CAT_FALLBACK;
 }
 
+int tx_access(const Tx& t, Policy policy, const Selectors& sels, uint64_t keys[MAX_TX_ACCESSES],
+              uint8_t modes[MAX_TX_ACCESSES], uint8_t* category) {
+    const uint8_t bal = policy == Policy::P3 ? COMMUTATIVE : WRITE;
+    const bool has_frm = t.frm != ABSENT;
+    const bool has_to = t.to != ABSENT;
+    const uint64_t frm = t.frm, to = t.to, a1 = t.a1, a2 = t.a2;
+    Cand c[MAX_TX_ACCESSES];
+    int k = 0;
+    uint8_t cat = CAT_FALLBACK;
+
+    if (policy == Policy::P1) {
+        if (has_frm) c[k++] = {account_key(frm), WRITE};
+        if (has_to) c[k++] = {account_key(to), WRITE};
+    } else {
+        cat = classify(t, sels);
+        const bool fb = cat == CAT_FALLBACK;
+        // sender: nonce + gas payment, or the whole account on fallback
+        if (!fb && has_frm) {
+            c[k++] = {nonce_key(frm), WRITE};
+            c[k++] = {eth_bal_key(frm), bal};
+            c[k++] = {account_key(frm), READ};
+        }
+        if (fb && has_frm) c[k++] = {account_key(frm), WRITE};
+        // to: parent of the recipient's ETH balance or the token's slots
+        if (has_to) c[k++] = {account_key(to), fb ? WRITE : READ};
+        switch (cat) {
+            case CAT_PLAIN:
+                c[k++] = {eth_bal_key(to), bal};
+                break;
+            case CAT_TRANSFER:
+                c[k++] = {token_bal_key(to, frm), bal};
+                c[k++] = {token_bal_key(to, a1), bal};
+                break;
+            case CAT_APPROVE:
+                c[k++] = {allowance_key(to, frm, a1), WRITE};
+                break;
+            case CAT_TRANSFER_FROM:
+                c[k++] = {token_bal_key(to, a1), bal};
+                c[k++] = {token_bal_key(to, a2), bal};
+                c[k++] = {allowance_key(to, a1, frm), WRITE};
+                break;
+            default:
+                break;
+        }
+    }
+    if (category) *category = cat;
+
+    // keys ascending (insertion sort on <= 7 items), duplicates merged
+    for (int a = 1; a < k; ++a)
+        for (int b = a; b > 0 && c[b].key < c[b - 1].key; --b) std::swap(c[b], c[b - 1]);
+    int out = 0;
+    for (int a = 0; a < k;) {
+        uint8_t m = 0;
+        int b = a;
+        while (b < k && c[b].key == c[a].key) m |= c[b++].mode;
+        keys[out] = c[a].key;
+        modes[out] = resolve(m);
+        ++out;
+        a = b;
+    }
+    return out;
+}
+
 AccessSets infer(const Tx* tx, size_t n, Policy policy, const Selectors& sels) {
     check_ids(tx, n);
     AccessSets out;
@@ -80,64 +143,12 @@ AccessSets infer(const Tx* tx, size_t n, Policy policy, const Selectors& sels) {
     out.category.assign(n, CAT_FALLBACK);
     out.keys.reserve(n * 5);
     out.modes.reserve(n * 5);
-    const uint8_t bal = policy == Policy::P3 ? COMMUTATIVE : WRITE;
-
+    uint64_t keys[MAX_TX_ACCESSES];
+    uint8_t modes[MAX_TX_ACCESSES];
     for (size_t i = 0; i < n; ++i) {
-        const Tx& t = tx[i];
-        const bool has_frm = t.frm != ABSENT;
-        const bool has_to = t.to != ABSENT;
-        const uint64_t frm = t.frm, to = t.to, a1 = t.a1, a2 = t.a2;
-        Cand c[7];
-        int k = 0;
-
-        if (policy == Policy::P1) {
-            if (has_frm) c[k++] = {account_key(frm), WRITE};
-            if (has_to) c[k++] = {account_key(to), WRITE};
-        } else {
-            const uint8_t cat = classify(t, sels);
-            out.category[i] = cat;
-            const bool fb = cat == CAT_FALLBACK;
-            // sender: nonce + gas payment, or the whole account on fallback
-            if (!fb && has_frm) {
-                c[k++] = {nonce_key(frm), WRITE};
-                c[k++] = {eth_bal_key(frm), bal};
-                c[k++] = {account_key(frm), READ};
-            }
-            if (fb && has_frm) c[k++] = {account_key(frm), WRITE};
-            // to: parent of the recipient's ETH balance or the token's slots
-            if (has_to) c[k++] = {account_key(to), fb ? WRITE : READ};
-            switch (cat) {
-                case CAT_PLAIN:
-                    c[k++] = {eth_bal_key(to), bal};
-                    break;
-                case CAT_TRANSFER:
-                    c[k++] = {token_bal_key(to, frm), bal};
-                    c[k++] = {token_bal_key(to, a1), bal};
-                    break;
-                case CAT_APPROVE:
-                    c[k++] = {allowance_key(to, frm, a1), WRITE};
-                    break;
-                case CAT_TRANSFER_FROM:
-                    c[k++] = {token_bal_key(to, a1), bal};
-                    c[k++] = {token_bal_key(to, a2), bal};
-                    c[k++] = {allowance_key(to, a1, frm), WRITE};
-                    break;
-                default:
-                    break;
-            }
-        }
-
-        // keys ascending (insertion sort on <= 7 items), duplicates merged
-        for (int a = 1; a < k; ++a)
-            for (int b = a; b > 0 && c[b].key < c[b - 1].key; --b) std::swap(c[b], c[b - 1]);
-        for (int a = 0; a < k;) {
-            uint8_t m = 0;
-            int b = a;
-            while (b < k && c[b].key == c[a].key) m |= c[b++].mode;
-            out.keys.push_back(c[a].key);
-            out.modes.push_back(resolve(m));
-            a = b;
-        }
+        const int k = tx_access(tx[i], policy, sels, keys, modes, &out.category[i]);
+        out.keys.insert(out.keys.end(), keys, keys + k);
+        out.modes.insert(out.modes.end(), modes, modes + k);
         out.offsets[i + 1] = int64_t(out.keys.size());
     }
     return out;

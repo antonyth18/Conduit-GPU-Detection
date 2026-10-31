@@ -1,0 +1,61 @@
+conduit_run flags: --impl omp --threads 8 --level kahn 
+
+1. Phase 4 slices against the oracle
+  PASS  2026-09-01/10k/099[:500] P1  reduced: edges 316 vs ref 5,499 (missing 5,183, 0 unimplied; extra 0); levels match; validators accept
+  PASS  2026-09-01/10k/099[:500] P2  reduced: edges 296 vs ref 549 (missing 253, 0 unimplied; extra 0); levels match; validators accept
+  PASS  2026-09-01/10k/099[:500] P3  reduced: edges 255 vs ref 450 (missing 195, 0 unimplied; extra 0); levels match; validators accept
+  PASS  2026-09-01/10k/099[:1000] P1  reduced: edges 774 vs ref 28,476 (missing 27,702, 0 unimplied; extra 0); levels match; validators accept
+  PASS  2026-09-01/10k/099[:1000] P2  reduced: edges 724 vs ref 3,186 (missing 2,462, 0 unimplied; extra 0); levels match; validators accept
+  PASS  2026-09-01/10k/099[:1000] P3  reduced: edges 562 vs ref 1,497 (missing 935, 0 unimplied; extra 0); levels match; validators accept
+  PASS  2026-09-01/10k/099[:2000] P1  reduced: edges 1,721 vs ref 99,664 (missing 97,943, 0 unimplied; extra 0); levels match; validators accept
+  PASS  2026-09-01/10k/099[:2000] P2  reduced: edges 1,734 vs ref 8,395 (missing 6,661, 0 unimplied; extra 0); levels match; validators accept
+  PASS  2026-09-01/10k/099[:2000] P3  reduced: edges 1,379 vs ref 5,533 (missing 4,154, 0 unimplied; extra 0); levels match; validators accept
+  PASS  2026-09-13/10k/073[:500] P1  reduced: edges 305 vs ref 5,790 (missing 5,485, 0 unimplied; extra 0); levels match; validators accept
+  PASS  2026-09-13/10k/073[:500] P2  reduced: edges 221 vs ref 660 (missing 439, 0 unimplied; extra 0); levels match; validators accept
+  PASS  2026-09-13/10k/073[:500] P3  reduced: edges 151 vs ref 281 (missing 130, 0 unimplied; extra 0); levels match; validators accept
+  PASS  2026-09-13/10k/073[:1000] P1  reduced: edges 751 vs ref 27,826 (missing 27,075, 0 unimplied; extra 0); levels match; validators accept
+  PASS  2026-09-13/10k/073[:1000] P2  reduced: edges 564 vs ref 1,820 (missing 1,256, 0 unimplied; extra 0); levels match; validators accept
+  PASS  2026-09-13/10k/073[:1000] P3  reduced: edges 406 vs ref 1,125 (missing 719, 0 unimplied; extra 0); levels match; validators accept
+  PASS  2026-09-13/10k/073[:2000] P1  reduced: edges 1,745 vs ref 114,511 (missing 112,766, 0 unimplied; extra 0); levels match; validators accept
+  PASS  2026-09-13/10k/073[:2000] P2  reduced: edges 1,577 vs ref 6,292 (missing 4,715, 0 unimplied; extra 0); levels match; validators accept
+  PASS  2026-09-13/10k/073[:2000] P3  reduced: edges 1,134 vs ref 4,035 (missing 2,901, 0 unimplied; extra 0); levels match; validators accept
+
+2. median super-blocks, full size, validate_fast
+  PASS  2026-09-01/100k/010   P1  n 100,098  edges   138,472  levels 21,013  floor 1,733  validator accept
+  PASS  2026-09-01/100k/010   P2  n 100,098  edges   166,428  levels  2,181  floor 1,733  validator accept
+  PASS  2026-09-01/100k/010   P3  n 100,098  edges   115,834  levels  1,733  floor 1,733  validator accept
+  PASS  2026-09-01/10k/099    P1  n  10,176  edges    11,328  levels  2,058  floor   222  validator accept
+  PASS  2026-09-01/10k/099    P2  n  10,176  edges    12,360  levels    326  floor   222  validator accept
+  PASS  2026-09-01/10k/099    P3  n  10,176  edges     8,852  levels    222  floor   222  validator accept
+  PASS  2026-09-01/20k/049    P1  n  20,101  edges    24,061  levels  3,891  floor   274  validator accept
+  PASS  2026-09-01/20k/049    P2  n  20,101  edges    26,979  levels    432  floor   274  validator accept
+  PASS  2026-09-01/20k/049    P3  n  20,101  edges    19,405  levels    310  floor   274  validator accept
+  PASS  2026-09-01/40k/025    P1  n  40,366  edges    52,109  levels  8,268  floor   671  validator accept
+  PASS  2026-09-01/40k/025    P2  n  40,366  edges    60,684  levels    871  floor   671  validator accept
+  PASS  2026-09-01/40k/025    P3  n  40,366  edges    42,139  levels    671  floor   671  validator accept
+  PASS  2026-09-01/60k/016    P1  n  60,044  edges    79,978  levels 12,311  floor   939  validator accept
+  PASS  2026-09-01/60k/016    P2  n  60,044  edges    93,525  levels  1,420  floor   939  validator accept
+  PASS  2026-09-01/60k/016    P3  n  60,044  edges    65,110  levels  1,105  floor   939  validator accept
+  PASS  2026-09-01/80k/012    P1  n  80,100  edges   108,612  levels 16,538  floor 1,239  validator accept
+  PASS  2026-09-01/80k/012    P2  n  80,100  edges   128,626  levels  1,835  floor 1,239  validator accept
+  PASS  2026-09-01/80k/012    P3  n  80,100  edges    88,679  levels  1,362  floor 1,239  validator accept
+  PASS  2026-09-13/100k/007   P1  n 100,174  edges   140,529  levels 18,678  floor 1,741  validator accept
+  PASS  2026-09-13/100k/007   P2  n 100,174  edges   167,992  levels  2,766  floor 1,741  validator accept
+  PASS  2026-09-13/100k/007   P3  n 100,174  edges   115,368  levels  1,741  floor 1,741  validator accept
+  PASS  2026-09-13/10k/073    P1  n  10,396  edges    11,718  levels  1,981  floor   181  validator accept
+  PASS  2026-09-13/10k/073    P2  n  10,396  edges    12,786  levels    266  floor   181  validator accept
+  PASS  2026-09-13/10k/073    P3  n  10,396  edges     8,991  levels    181  floor   181  validator accept
+  PASS  2026-09-13/20k/036    P1  n  20,096  edges    25,044  levels  3,949  floor   373  validator accept
+  PASS  2026-09-13/20k/036    P2  n  20,096  edges    28,032  levels    529  floor   373  validator accept
+  PASS  2026-09-13/20k/036    P3  n  20,096  edges    19,567  levels    373  floor   373  validator accept
+  PASS  2026-09-13/40k/018    P1  n  40,085  edges    52,943  levels  7,609  floor   704  validator accept
+  PASS  2026-09-13/40k/018    P2  n  40,085  edges    61,628  levels  1,300  floor   704  validator accept
+  PASS  2026-09-13/40k/018    P3  n  40,085  edges    42,290  levels    704  floor   704  validator accept
+  PASS  2026-09-13/60k/012    P1  n  60,129  edges    81,744  levels 11,328  floor 1,037  validator accept
+  PASS  2026-09-13/60k/012    P2  n  60,129  edges    96,335  levels  1,874  floor 1,037  validator accept
+  PASS  2026-09-13/60k/012    P3  n  60,129  edges    66,038  levels  1,037  floor 1,037  validator accept
+  PASS  2026-09-13/80k/009    P1  n  80,029  edges   111,124  levels 15,001  floor 1,374  validator accept
+  PASS  2026-09-13/80k/009    P2  n  80,029  edges   132,258  levels  2,305  floor 1,374  validator accept
+  PASS  2026-09-13/80k/009    P3  n  80,029  edges    90,858  levels  1,374  floor 1,374  validator accept
+
+ALL CHECKS PASSED
