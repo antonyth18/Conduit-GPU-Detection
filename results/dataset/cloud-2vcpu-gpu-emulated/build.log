@@ -1,0 +1,11 @@
+-- conduit: OpenMP 4.5 enabled
+-- Configuring done (0.0s)
+-- Generating done (0.0s)
+-- Build files have been written to: /home/claude/ext/repo/build
+[ 50%] Built target conduit
+[ 58%] Built target conduit_run
+[ 66%] Built target dump_access
+[ 75%] Built target conduit_bench
+[ 83%] Built target membw
+[ 91%] Built target conduit_gpu
+[100%] Built target conduit_tests

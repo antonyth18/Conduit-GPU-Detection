@@ -1,0 +1,45 @@
+conduit_gpu execute: GPU built without CUDA (CONDUIT_HAVE_CUDA undefined); backend emu; OpenMP on
+
+=== 2026-09-01/full  policy P1  (2013158 transactions) ===
+preprocessing (conflicts + DAG + levels): seq-std 653.4 ms, OpenMP(2) 256.5 ms, emu 810.1 ms  -> 401223 batches, 3070055 edges, identical output
+executor                   threads    seconds   speedup     executed  final state == serial
+serial (block order)             1      3.459      1.00      2013158  reference
+level batches + barriers         1      3.673      0.94      2013158  yes
+level batches + barriers         2      3.575      0.97      2013158  yes
+DAG dataflow (no barrier)        1      3.757      0.92      2013158  yes
+DAG dataflow (no barrier)        2      2.066      1.67      2013158  yes
+model (gas-weighted), speedup over serial on W workers:
+  W =                             8       16       32       64      inf
+  level batches                1.95     1.97     1.98     1.99     1.99
+  DAG dataflow                 7.99    10.92    10.93    10.93    10.93
+END TO END: serial execution 3.459 s  vs  emu preprocessing + DAG execution 2.876 s  =  1.20x faster (levels+barriers: 0.79x); all 2013158 transactions executed, final state identical
+
+=== 2026-09-01/full  policy P2  (2013158 transactions) ===
+preprocessing (conflicts + DAG + levels): seq-std 831.6 ms, OpenMP(2) 306.9 ms, emu 1147.2 ms  -> 401223 batches, 3736831 edges, identical output
+executor                   threads    seconds   speedup     executed  final state == serial
+serial (block order)             1      3.492      1.00      2013158  reference
+level batches + barriers         1      3.729      0.94      2013158  yes
+level batches + barriers         2      3.584      0.97      2013158  yes
+DAG dataflow (no barrier)        1      3.777      0.92      2013158  yes
+DAG dataflow (no barrier)        2      2.112      1.65      2013158  yes
+model (gas-weighted), speedup over serial on W workers:
+  W =                             8       16       32       64      inf
+  level batches                1.95     1.97     1.98     1.99     1.99
+  DAG dataflow                 7.99    10.92    10.93    10.93    10.93
+END TO END: serial execution 3.492 s  vs  emu preprocessing + DAG execution 3.259 s  =  1.07x faster (levels+barriers: 0.74x); all 2013158 transactions executed, final state identical
+
+=== 2026-09-01/full  policy P3  (2013158 transactions) ===
+preprocessing (conflicts + DAG + levels): seq-std 821.5 ms, OpenMP(2) 378.3 ms, emu 1065.3 ms  -> 392438 batches, 3233216 edges, identical output
+executor                   threads    seconds   speedup     executed  final state == serial
+serial (block order)             1      3.488      1.00      2013158  reference
+level batches + barriers         1      3.736      0.93      2013158  yes
+level batches + barriers         2      3.552      0.98      2013158  yes
+DAG dataflow (no barrier)        1      3.749      0.93      2013158  yes
+DAG dataflow (no barrier)        2      2.068      1.69      2013158  yes
+model (gas-weighted), speedup over serial on W workers:
+  W =                             8       16       32       64      inf
+  level batches                1.96     1.99     2.00     2.01     2.01
+  DAG dataflow                 7.99    10.92    10.93    10.94    10.94
+END TO END: serial execution 3.488 s  vs  emu preprocessing + DAG execution 3.133 s  =  1.11x faster (levels+barriers: 0.76x); all 2013158 transactions executed, final state identical
+
+wrote results/dataset/vm/execute.csv

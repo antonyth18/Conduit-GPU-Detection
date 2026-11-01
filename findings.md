@@ -911,3 +911,62 @@ These two biases point in opposite directions, so neither can be assumed to
 cancel the other. The next step that would most tighten the answer is
 decoding router calldata to recover pool addresses. That would also close
 the gap between P3's measured median and the ~65x nonce bound.
+
+## Phase 8 — CUDA pipeline (implementation; GPU numbers pending)
+
+Design and correctness evidence only. **No GPU timing is reported here yet:**
+the code was written on a machine without a CUDA compiler, so every check
+below ran through the host emulation (`--impl gpu-emu`), which executes the
+same kernel bodies (`src/gpu/kernels.hpp`) launch by launch. Fill in the
+timing subsections from `tools/run_phase8.sh` on the RTX 4050 machine.
+Full description: `GPU_README.md`.
+
+- **Stages 1–3 on the GPU**, levelling by the CPU sweep by default (as this
+  file's Phase 7 result asks), with GPU Kahn and Jones–Plassmann as measured
+  alternatives. CUB stable radix sort by key gives the full record order
+  because extraction emits records in transaction order.
+- **Bit-identical to seq-std** (records, emitted edges, read-comm count,
+  groups, CSR, levels) for both detection modes, three levelling methods and
+  three tail thresholds: 36 unit tests (mutation-tested) and
+  `conduit_gpu verify` (1,620 checks on the synthetic median super-blocks,
+  0 failures, emulation).
+- **jp-index = levels** by construction (round = longest path in the full
+  conflict graph = longest path in the reduced graph) and by test.
+- **jp-random batches are conflict-free** (checked from the access sets, not
+  from any graph) and identical across thresholds; never below the per-key
+  lower bound.
+- **Counters, synthetic eth-like 60k, P2 (emulation, not times):** Kahn needs
+  84 launches, 1,911 of its 1,943 rounds in the persistent block; JP needs
+  ~7,000 queued launches because every round rescans all uncoloured
+  transactions (O(rounds × active) work). Prediction to test on the GPU:
+  stage 4 ranks sweep < Kahn < JP in time on deep graphs.
+
+### Phase 8 — crossover  [TODO on the GPU machine]
+### Phase 9 — skew: group (before) vs balanced (after) detection  [TODO]
+### Phase 10 — full sweep and profiler pass  [TODO]
+
+**Synthetic workloads** (`tools/synth_corpus.py`) are models, labelled
+synthetic wherever used. The eth-like scenario is calibrated only to the
+shape of Phase 6 (P1 ≈ 7×, P3 ≈ 37× at 100k, hot-wallet nonce floor), not to
+its distribution.
+
+## Phase 8b — full-day run on the user dataset (2026-09-01, all 2,013,158 tx)
+
+Input: one BigQuery export of 2026-09-01 (7,172 blocks), **without calldata**,
+ingested with `ingest.py --tx` (nothing dropped). Machine: cloud dev
+container, 2 vCPU; GPU stages via emulation, so only CPU times, counters and
+models below are meaningful.
+
+- Full day as ONE block: 401,223 levels (P1/P2), 392,438 (P3); per-key lower
+  bound 388,725 = the USDT contract (`0xdac17f…1ec7`, 388,725 calls). Without
+  calldata every ERC-20 call is contract-granular, so P2/P3 ≈ P1 here. This is
+  a property of the input, not of the policies (Phase 6 used calldata).
+- **Execution, gas-weighted model:** level batches with a barrier reach at
+  most 1.99–2.01× even with unbounded workers (each of ~400k batches waits for
+  its slowest transaction); dataflow on the same DAG reaches 10.93–10.94×
+  (gas-weighted critical path), 7.99× already at 8 workers.
+- **Execution, measured** (toy state machine, work ∝ gas, 2 threads): DAG
+  dataflow 1.63–1.74× over serial, level batches 0.98–0.99×; final state and
+  all 2,013,158 outputs identical to serial in every run.
+- Seq-std preprocessing of the whole day: 0.61 s (P1) to 0.85 s (P2);
+  OpenMP on 2 threads 0.27–0.35 s.

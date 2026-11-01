@@ -299,5 +299,260 @@ def main():
           f"{len(sels.list):,} distinct selectors")
 
 
+# ---- generic mode: any BigQuery-style transaction export ----------------------
+#
+#   python3 ingest.py --tx data/my_export.csv [more.csv ...] [--calldata cd.csv ...]
+#                     [--out corpus_eth] [--targets 10000,...]
+#
+# Needs the columns block_number, transaction_index, hash, from_address,
+# to_address; uses selector, value, receipt_status, receipt_gas_used,
+# receipt_contract_address, transaction_type and block_timestamp when present.
+# Rows are de-duplicated on (block_number, transaction_index), sorted into
+# execution order and split into days by the date of block_timestamp. Every
+# transaction of the input is written; nothing is sampled or dropped.
+#
+# Without a calldata file, ERC-20 transfer / approve / transferFrom calls have
+# no decoded operands (the recipient is unknown), so P2/P3 conservatively
+# treat them like any other contract call (contract granularity). Supplying
+# the calldata export (the same format as data/calldata_*.csv) restores the
+# slot-level keys.
+#
+# Also writes <out>/superblocks.json: the usual super-block sizes, larger ones
+# (250k, 500k, 1M) and one FULL-DAY super-block per day ("<date>/full") that
+# covers every transaction of that day.
+
+REQUIRED = ("block_number", "transaction_index", "hash", "from_address", "to_address")
+BIG_TARGETS = (250_000, 500_000, 1_000_000)
+
+
+def _csv_header(path):
+    with open(path, newline="") as f:
+        return next(csv.reader(f), [])
+
+
+def _discover(paths):
+    """Expand directories; classify CSVs into tx exports and calldata files."""
+    files = []
+    for p in paths:
+        p = Path(p)
+        files += sorted(p.glob("*.csv")) if p.is_dir() else [p]
+    tx, cd = [], []
+    for f in files:
+        h = _csv_header(f)
+        if all(c in h for c in REQUIRED):
+            tx.append(f)
+        elif "hash" in h and len(h) >= 7:
+            cd.append(f)
+        else:
+            print(f"  skipping {f}: not a transaction or calldata export (header {h[:6]}...)")
+    return tx, cd
+
+
+def main_files(argv):
+    import argparse
+    ap = argparse.ArgumentParser(description="Ingest arbitrary transaction exports")
+    ap.add_argument("--tx", nargs="+", required=True,
+                    help="transaction CSV files or directories (calldata CSVs found there are used too)")
+    ap.add_argument("--calldata", nargs="*", default=[], help="calldata CSV files (optional)")
+    ap.add_argument("--out", default="corpus_eth")
+    ap.add_argument("--targets", default=None,
+                    help="super-block sizes (default: 10k..100k, 250k, 500k, 1M, plus full day)")
+    args = ap.parse_args(argv)
+
+    tx_files, cd_found = _discover(args.tx)
+    cd_files = [Path(c) for c in args.calldata] + [c for c in cd_found if c not in args.calldata]
+    if not tx_files:
+        sys.exit("no transaction CSV found (needs columns " + ", ".join(REQUIRED) + ")")
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+
+    calldata = {}
+    cd_stats = {"rows": 0, "truncated": 0, "malformed": 0}
+    for c in cd_files:
+        print(f"loading calldata {c} ...", flush=True)
+        d, st = load_calldata(c)
+        calldata.update(d)
+        for k in cd_stats:
+            cd_stats[k] += st[k]
+
+    addrs = Interner()
+    sels = Interner()
+    rows = {}
+    stats = {"read": 0, "duplicates": 0, "creates": 0, "matched": 0, "token_calls": 0,
+             "token_calls_decoded": 0}
+    TOKEN_SELS = (SEL_TRANSFER, SEL_APPROVE, SEL_TRANSFER_FROM)
+
+    def num(row, col, name, default=0):
+        i = col.get(name)
+        if i is None:
+            return default
+        try:
+            return int(row[i] or 0)
+        except ValueError:
+            return default
+
+    for path in tx_files:
+        print(f"reading {path} ({path.stat().st_size / 1e6:.0f} MB) ...", flush=True)
+        with open(path, newline="") as f:
+            r = csv.reader(f)
+            header = next(r)
+            col = {name: i for i, name in enumerate(header)}
+            ts = col.get("block_timestamp")
+            for row in r:
+                if len(row) < len(REQUIRED):
+                    continue
+                stats["read"] += 1
+                bn = int(row[col["block_number"]])
+                ti = int(row[col["transaction_index"]])
+                if (bn, ti) in rows:
+                    stats["duplicates"] += 1
+                    continue
+                h = row[col["hash"]]
+                frm = norm_addr(row[col["from_address"]])
+                to = norm_addr(row[col["to_address"]])
+                sel = (row[col["selector"]] if "selector" in col else "") or "0x"
+                value_gwei = num(row, col, "value") // 10**9
+                gas = num(row, col, "receipt_gas_used")
+                status = num(row, col, "receipt_status", 1)
+                ttype = num(row, col, "transaction_type")
+                date = row[ts][:10] if ts is not None and row[ts] else "day0"
+
+                flags = 0
+                if to is None:
+                    flags |= FLAG_CREATE
+                    stats["creates"] += 1
+                    ca = col.get("receipt_contract_address")
+                    created = norm_addr(row[ca]) if ca is not None else None
+                    to_id = addrs.get(created) if created else ABSENT
+                else:
+                    to_id = addrs.get(to)
+                a1 = a2 = ABSENT
+                if sel in TOKEN_SELS:
+                    stats["token_calls"] += 1
+                cd = calldata.get(hash_key(h)) if calldata else None
+                if cd is not None:
+                    stats["matched"] += 1
+                    d1, d2, cdflags = cd
+                    flags |= cdflags
+                    if d1:
+                        a1 = addrs.get(d1)
+                    if d2:
+                        a2 = addrs.get(d2)
+                    if sel in TOKEN_SELS and (cdflags & FLAG_DECODED):
+                        stats["token_calls_decoded"] += 1
+                rows[(bn, ti)] = (
+                    bn, ti, sels.get(sel), addrs.get(frm) if frm else ABSENT,
+                    to_id, a1, a2, min(value_gwei, 2**64 - 1), min(gas, 2**32 - 1),
+                    status & 0xFF, ttype & 0xFF, flags, date)
+
+    if len(addrs.list) > (1 << 21) - 1:
+        sys.exit(f"{len(addrs.list):,} distinct addresses exceed the 21-bit id space "
+                 "(policy.hpp MAX_ID); split the input into smaller corpora")
+    if len(sels.list) > 0xFFFF:
+        sys.exit("more than 65535 distinct selectors")
+
+    keys = sorted(rows)
+    if not keys:
+        sys.exit("no rows")
+    dates = []
+    for k in keys:
+        if not dates or dates[-1] != rows[k][-1]:
+            dates.append(rows[k][-1])
+    if len(set(dates)) != len(dates):
+        sys.exit("block_timestamp dates are not contiguous in block order")
+    if any(t > 0xFFFF for _, t in keys):
+        sys.exit("transaction_index above 65535")
+
+    blk_s = struct.Struct("<III")
+    meta = {"days": [], "record_bytes": REC.size, "source": [str(p) for p in tx_files],
+            "calldata": [str(p) for p in cd_files]}
+    idx = 0
+    with open(out / "tx.bin", "wb") as tx_f, open(out / "blocks.bin", "wb") as blk_f:
+        for day_id, date in enumerate(dates):
+            day = [rows[k] for k in keys if rows[k][-1] == date]
+            buf = bytearray()
+            blkbuf = bytearray()
+            cur, start, count = None, idx, 0
+            for i, t in enumerate(day):
+                buf += REC.pack(*t[:12], day_id)
+                if t[0] != cur:
+                    if cur is not None:
+                        blkbuf += blk_s.pack(cur, start, count)
+                    cur, start, count = t[0], idx + i, 0
+                count += 1
+            blkbuf += blk_s.pack(cur, start, count)
+            tx_f.write(buf)
+            blk_f.write(blkbuf)
+            meta["days"].append({
+                "date": date, "day_id": day_id, "transactions": len(day),
+                "blocks": len(blkbuf) // blk_s.size, "first_tx_index": idx,
+                "block_min": day[0][0], "block_max": day[-1][0],
+            })
+            print(f"  [{date}] {len(day):,} tx in {len(blkbuf) // blk_s.size:,} blocks", flush=True)
+            idx += len(day)
+
+    addrs.write(out / "addresses.txt")
+    sels.write(out / "selectors.txt")
+    meta.update({
+        "total_transactions": idx,
+        "distinct_addresses": len(addrs.list),
+        "distinct_selectors": len(sels.list),
+        "rows_read": stats["read"], "duplicates_dropped": stats["duplicates"],
+        "creates": stats["creates"], "calldata_rows": cd_stats["rows"],
+        "calldata_matched": stats["matched"], "token_calls": stats["token_calls"],
+        "token_calls_decoded": stats["token_calls_decoded"],
+    })
+    with open(out / "meta.json", "w") as f:
+        json.dump(meta, f, indent=2)
+
+    # super-block manifest: standard + large sizes + one full day per day
+    import numpy as np
+    from superblocks import BLOCK_DTYPE, TARGETS, build_manifest, dumps, max_sender, tile
+    smallest = min(d["transactions"] for d in meta["days"])
+    if args.targets:
+        targets = tuple(int(x) for x in args.targets.split(","))
+    else:
+        targets = tuple(t for t in TARGETS + BIG_TARGETS if t < smallest)
+    manifest = build_manifest(corpus=out, targets=targets)
+    tx = np.memmap(out / "tx.bin", dtype=DTYPE_ARR, mode="r")
+    blocks = np.fromfile(out / "blocks.bin", dtype=BLOCK_DTYPE)
+    off = 0
+    for d in meta["days"]:
+        db = blocks[off:off + d["blocks"]]
+        start, count = int(db["start"][0]), int(db["count"].sum())
+        _, top = max_sender(tx["frm"][start:start + count])
+        manifest["superblocks"].append({
+            "id": f"{d['date']}/full", "date": d["date"], "day_id": d["day_id"],
+            "target": count, "sample": 0, "tx_start": start, "tx_count": count,
+            "block_first": int(db["block"][0]), "block_last": int(db["block"][-1]),
+            "block_count": int(d["blocks"]), "block_index_start": off,
+            "missing_blocks": int(db["block"][-1]) - int(db["block"][0]) + 1 - int(d["blocks"]),
+            "max_sender_tx": top})
+        manifest["targets"].append(count)
+        off += d["blocks"]
+    manifest["targets"] = sorted(set(manifest["targets"]))
+    (out / "superblocks.json").write_text(dumps(manifest))
+
+    print(f"\ncorpus written to {out}/  ({idx:,} transactions, {len(dates)} day(s), "
+          f"{len(addrs.list):,} addresses, {len(sels.list):,} selectors)")
+    print(f"manifest {out}/superblocks.json: {len(manifest['superblocks'])} super-blocks, "
+          f"targets {manifest['targets']}")
+    if stats["duplicates"]:
+        print(f"note: {stats['duplicates']:,} duplicate (block, index) rows dropped")
+    if stats["token_calls"] and stats["token_calls_decoded"] < stats["token_calls"]:
+        miss = stats["token_calls"] - stats["token_calls_decoded"]
+        print(f"note: {miss:,} of {stats['token_calls']:,} ERC-20 transfer/approve/transferFrom "
+              "calls have no decoded operands (no calldata file): P2/P3 treat them at contract "
+              "granularity, so P2/P3 parallelism is a conservative lower bound.")
+
+
+DTYPE_ARR = None
+
+
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) > 1:
+        from access_sets import DTYPE as _DT
+        DTYPE_ARR = _DT
+        main_files(sys.argv[1:])
+    else:
+        main()

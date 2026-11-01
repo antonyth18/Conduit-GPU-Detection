@@ -4,6 +4,7 @@
 #include <chrono>
 #include <stdexcept>
 
+#include "conduit/gpu.hpp"
 #include "conduit/radix.hpp"
 #include "detail.hpp"
 
@@ -13,7 +14,9 @@ Impl parse_impl(const std::string& s) {
     if (s == "seq-std") return Impl::SeqStd;
     if (s == "seq-radix") return Impl::SeqRadix;
     if (s == "omp") return Impl::Omp;
-    throw std::runtime_error("unknown impl " + s + " (seq-std | seq-radix | omp)");
+    if (s == "cuda") return Impl::Cuda;
+    if (s == "gpu-emu") return Impl::GpuEmu;
+    throw std::runtime_error("unknown impl " + s + " (seq-std | seq-radix | omp | cuda | gpu-emu)");
 }
 
 LevelAlgo parse_level(const std::string& s) {
@@ -35,6 +38,8 @@ const char* impl_name(Impl i) {
         case Impl::SeqStd: return "seq-std";
         case Impl::SeqRadix: return "seq-radix";
         case Impl::Omp: return "omp";
+        case Impl::Cuda: return "cuda";
+        case Impl::GpuEmu: return "gpu-emu";
     }
     return "?";
 }
@@ -154,6 +159,23 @@ Result run_pipeline(const Tx* tx, size_t n, Policy policy, const Selectors& sels
     auto secs = [](clock::time_point a, clock::time_point b) {
         return std::chrono::duration<double>(b - a).count();
     };
+    if (opts.impl == Impl::Cuda || opts.impl == Impl::GpuEmu) {
+        GpuOptions g;
+        g.backend = opts.impl == Impl::Cuda ? GpuBackend::Cuda : GpuBackend::Emu;
+        if (opts.level == LevelAlgo::Kahn) g.level = GpuLevel::Kahn;
+        else if (opts.level == LevelAlgo::Sweep) g.level = GpuLevel::Sweep;
+        else throw std::runtime_error("the GPU pipeline levels by sweep or kahn, not bf");
+        GpuTimings gt;
+        Result r = run_pipeline_gpu(tx, n, policy, sels, g, &gt);
+        if (timings) {
+            timings->extract = gt.h2d + gt.extract;
+            timings->sort = gt.sort;
+            timings->detect = gt.detect;
+            timings->csr = gt.csr + gt.d2h;
+            timings->level = gt.level;
+        }
+        return r;
+    }
     const bool omp = opts.impl == Impl::Omp;
     Result res;
 
@@ -165,6 +187,7 @@ Result run_pipeline(const Tx* tx, size_t n, Policy policy, const Selectors& sels
         case Impl::SeqStd: sort_records(records); break;
         case Impl::SeqRadix: radix_sort_records_seq(records); break;
         case Impl::Omp: radix_sort_records_omp(records, opts.threads); break;
+        default: break;
     }
     auto t2 = clock::now();
     std::vector<uint64_t> edges = omp ? detect_omp(records, opts.threads, opts.schedule,
@@ -175,6 +198,7 @@ Result run_pipeline(const Tx* tx, size_t n, Policy policy, const Selectors& sels
         case Impl::SeqStd: res.graph = build_csr(uint32_t(n), edges); break;
         case Impl::SeqRadix: res.graph = build_csr_radix(uint32_t(n), edges); break;
         case Impl::Omp: res.graph = build_csr_omp(uint32_t(n), edges, opts.threads); break;
+        default: break;
     }
     auto t4 = clock::now();
     switch (opts.level) {

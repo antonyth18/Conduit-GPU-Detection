@@ -558,6 +558,8 @@ TEST(json_parses_manifest_shapes) {
     CHECK(v["t"].boolean);
 }
 
+#include "test_gpu.inc"
+
 int main() {
     for (const auto& t : registry()) {
         int before = failures;

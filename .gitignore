@@ -4,3 +4,5 @@ __pycache__/
 oracle_ref/
 build/
 xcheck/
+corpus_synth/
+corpus_eth/

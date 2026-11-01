@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "conduit/corpus.hpp"
+#include "conduit/gpu.hpp"
 #include "conduit/pipeline.hpp"
 #include "conduit/radix.hpp"
 
@@ -108,6 +109,16 @@ int run_identical(const Corpus& corpus, const Manifest& m, const Selectors& sels
                     }
                 }
             }
+            // Phase 8: the GPU pipeline (or its host emulation when no GPU is
+            // visible), with CPU sweep and with GPU Kahn levelling
+            {
+                Options o;
+                o.impl = have_cuda() ? Impl::Cuda : Impl::GpuEmu;
+                o.level = LevelAlgo::Sweep;
+                variants.push_back(o);
+                o.level = LevelAlgo::Kahn;
+                variants.push_back(o);
+            }
             if (!sorts_ok) {
                 ++mismatches;
                 std::cerr << "MISMATCH sorted records " << sb.id << " " << policy_name(p) << "\n";
@@ -143,6 +154,7 @@ int run_scale(const Corpus& corpus, const Manifest& m, const Selectors& sels, co
     for (const auto& date : m.dates()) {
         for (uint32_t t : m.targets) {
             auto es = m.entries(date, t);
+            if (es.empty()) continue;
             const SuperBlock* med = es[es.size() / 2];
             if (t == m.targets.front())
                 for (int lim : limits) cases.push_back({med, size_t(lim)});
@@ -280,7 +292,7 @@ int main(int argc, char** argv) {
         std::cout << ", max threads " << omp_get_max_threads() << ", procs "
                   << omp_get_num_procs();
 #endif
-        std::cout << "\n";
+        std::cout << "\n" << "GPU: " << cuda_device_info() << "\n";
         if (mode == "identical") return run_identical(corpus, m, sels, c, bf_every, date, target);
         if (mode == "scale") {
             if (csv.empty()) throw std::runtime_error("scale needs --csv FILE");

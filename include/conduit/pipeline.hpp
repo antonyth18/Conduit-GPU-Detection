@@ -80,9 +80,15 @@ struct Result {
 //   seq-std    Phase 5 baseline: std::sort for records and edges, sweep levelling
 //   seq-radix  second baseline: sequential LSD radix for both sorts, sweep
 //   omp        OpenMP: every stage parallel, parallel radix, Kahn levelling
+//   cuda       Phase 8: CUDA stages 1-3 (gpu.hpp), balanced detection; levelling
+//              by sweep on the CPU (default) or Kahn on the GPU (--level kahn).
+//              Timings: extract includes H2D, csr includes D2H, so total() is
+//              the end-to-end cost with transfers charged to the GPU.
+//   gpu-emu    the same kernel bodies executed on the host (gpu.hpp); for
+//              correctness checks without a GPU, its timings mean nothing.
 // seq-radix exists so a parallel speedup is not credited for the change from
 // comparison sort to radix sort.
-enum class Impl { SeqStd, SeqRadix, Omp };
+enum class Impl { SeqStd, SeqRadix, Omp, Cuda, GpuEmu };
 enum class LevelAlgo { Sweep, Kahn, BellmanFord };
 enum class Schedule { Static, Dynamic, Guided };
 

@@ -5,7 +5,8 @@
 //   conduit_run [--policy P1|P2|P3|all] (--id ID ... | --median | --all)
 //               [--date D] [--target T] [--limit N] [--runs 7] [--warmup 2]
 //               [--dump DIR] [--csv FILE] [--quiet] [--corpus DIR] [--manifest PATH]
-//               [--impl seq-std|seq-radix|omp] [--threads N] [--level sweep|kahn|bf]
+//               [--impl seq-std|seq-radix|omp|cuda|gpu-emu] [--threads N]
+//               [--level sweep|kahn|bf]
 //               [--schedule dynamic|static|guided]
 //
 // --median picks each day's median super-block at every target size.
@@ -139,7 +140,7 @@ int main(int argc, char** argv) {
             for (const auto& date : manifest.dates())
                 for (uint32_t t : manifest.targets) {
                     auto es = manifest.entries(date, t);
-                    chosen.push_back(es[es.size() / 2]);
+                    if (!es.empty()) chosen.push_back(es[es.size() / 2]);
                 }
         if (use_all)
             for (const auto& s : manifest.superblocks)

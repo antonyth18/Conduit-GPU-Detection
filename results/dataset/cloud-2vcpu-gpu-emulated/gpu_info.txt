@@ -1,0 +1,1 @@
+conduit_gpu info: GPU built without CUDA (CONDUIT_HAVE_CUDA undefined); backend emu; OpenMP on
