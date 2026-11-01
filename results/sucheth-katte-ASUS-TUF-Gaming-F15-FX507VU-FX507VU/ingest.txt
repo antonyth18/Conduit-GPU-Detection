@@ -1,0 +1,6 @@
+reading dataset.csv (481 MB) ...
+  [2026-09-01] 2,013,158 tx in 7,172 blocks
+
+corpus written to corpus_eth/  (2,013,158 transactions, 1 day(s), 704,167 addresses, 33,531 selectors)
+manifest corpus_eth/superblocks.json: 440 super-blocks, targets [10000, 20000, 40000, 60000, 80000, 100000, 250000, 500000, 1000000, 2013158]
+note: 725,509 of 725,509 ERC-20 transfer/approve/transferFrom calls have no decoded operands (no calldata file): P2/P3 treat them at contract granularity, so P2/P3 parallelism is a conservative lower bound.
