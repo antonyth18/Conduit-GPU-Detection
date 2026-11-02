@@ -1,0 +1,13 @@
+date: 2026-11-02T13:40:38Z   host: sucheth-katte-ASUS-TUF-Gaming-F15-FX507VU-FX507VU   data: datasets
+threads swept: 1,2,4,8,16   runs: 1 warm-up + 2 measured
+Linux sucheth-katte-ASUS-TUF-Gaming-F15-FX507VU-FX507VU 7.0.0-42-generic #42~24.04.1-Ubuntu SMP PREEMPT_DYNAMIC Mon Oct 19 14:43:01 UTC 2 x86_64 x86_64 x86_64 GNU/Linux
+CPU(s):                                  16
+Model name:                              13th Gen Intel(R) Core(TM) i7-13620H
+Thread(s) per core:                      2
+Core(s) per socket:                      10
+CPU(s) scaling MHz:                      66%
+               total        used        free      shared  buff/cache   available
+Mem:            15Gi       7.8Gi       967Mi       935Mi       7.7Gi       7.4Gi
+name, memory.total [MiB], driver_version
+NVIDIA GeForce RTX 4050 Laptop GPU, 6141 MiB, 595.99.02
+nvcc: not found

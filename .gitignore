@@ -1,4 +1,5 @@
 data/
+datasets/
 dataset.csv
 corpus/
 __pycache__/
