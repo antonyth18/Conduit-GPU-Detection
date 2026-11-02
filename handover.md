@@ -1,201 +1,128 @@
-# Handover: GPU-Accelerated Conflict Detection (IT 301)
+# Phase 8–10: what to fix before the results go into findings.md
 
-## What this project is
+Review of the calldata run (commit `eb27431`, results in
+`results/dataset/sucheth-katte-ASUS-TUF-Gaming-F15-FX507VU-FX507VU Test2/`),
+plus items still open from the first review of `48d9b28` and `32ea4ba`.
 
-We measure how much parallelism exists in real Ethereum blocks, and what it
-costs to compute the schedule. Two questions:
+## What's already good
 
-- **Question A (answered, Phase 6):** how much parallelism is there, and what
-  limits it?
-- **Question B (your part, Phases 8–10):** what does computing it cost on CPU
-  vs GPU, and when does GPU offloading pay off?
+- **The corpus matches Phase 6.** Your corpus has both days with calldata
+  (3,489,388 transactions; 84 of 1.25M token calls undecoded). All 36 checks
+  that overlap with Phase 6 are identical on size, records, edges and levels:
+  the 12 median super-blocks × 3 policies.
+- **The GPU was really used** (`backend cuda`; 0.75–1.3 GB of device memory at
+  full-day size). All 852 GPU checks and all 38 unit tests pass.
+- **The results cover Phases 8 and 9.**
+  - **Crossover:** the GPU, with transfers charged, beats seq-radix from 1–5k
+    transactions and OpenMP from 1k.
+  - **Skew recovery:** 19–43x, with the USDT contract key as the hot group.
+  - **GPU levelling:** Kahn on the GPU is 8–24x slower than the CPU sweep,
+    which agrees with Phase 7.
 
-Important framing: this project does NOT try to beat Block-STM. That was the
-original proposal and it is not achievable — static conflict detection can't
-win on Ethereum, and we have the measurements explaining why. The contribution
-is characterisation, not speedup. Please don't re-frame results as "we beat X".
+None of the conclusions is expected to change. The fixes are about making the
+numbers clean enough to publish.
 
-## What's done (Phases 0–7)
+## Fix 1: re-run with the full repetition count
 
-| Phase | What |
-|---|---|
-| 0 | Data: 4 BigQuery exports, 2 days of Ethereum mainnet (2026-09-01, 2026-09-13) |
-| 1 | Binary corpus: 3,489,388 transactions, loads in 0.27 s |
-| 2 | Three inference policies: P1 contract, P2 slot, P3 commutative |
-| 3 | 736 disjoint super-blocks, 10k–100k transactions |
-| 4 | Python oracle + independent schedule validator |
-| 5 | Verified single-threaded C++ pipeline (~60 ms per 100k super-block) |
-| 6 | THE RESEARCH RESULT — full sweep, 2,208 runs |
-| 7 | OpenMP implementation [status: finishing sweep] |
+The run used 1 warm-up + 2 measured runs. The standard is **2 warm-up + 7
+measured, median reported**. The noise is visible: seq-radix at 80k P1 on
+Sep 1 is 22.3 ms, against 6.1 ms at 60k and 11.6 ms at 100k. That one outlier
+produces a spurious 15.6x speedup.
 
-Read `findings.md` first. It has a corrections log (C1–C8) recording where we
-predicted something, tested it, and were wrong. Keep that practice.
+Before re-running:
+- Plug the laptop in and select the performance power mode. `machine.txt`
+  showed the CPU at 66% clock, and the earlier run had 278 MB of RAM free.
+- Close other applications, and record the power mode in `machine.txt`.
 
-## Key results you need to know
+## Fix 2: run the Python validator and the full bit-identity sweep
 
-- **Granularity is the big lever:** P1 gives ~5x parallelism, P2 35–49x, P3
-  45–64x. Coarse conflict description inflates contention ~10x.
-- **Parallelism is FLAT in batch size:** 10k to 100k changes it by at most 12%.
-- **~33% of transactions are generic contract calls with no inferable
-  footprint.** They fall back to contract granularity under every policy.
-- **Two verified limits:** OKX Hot Wallet 5 (nonce chains, structural, 67.7% of
-  super-blocks) and a launch-day NFT mint (transient).
-- **Levelling does NOT parallelise.** Level-synchronous scheduling gets SLOWER
-  with more threads: ~21,000 levels × 2 barriers each, and barrier cost scales
-  with graph depth while work per level scales with width. Our graphs are deep
-  and thin. This is a finding, not a bug.
-- **Pipeline is sort-dominated:** 60–70% of time in the sort, under 2% in
-  levelling. (This is with `std::sort`, the seq-std baseline. With the radix
-  sort added in Phase 7 the sort drops to roughly 25–45% at 100k, and
-  extraction becomes as large as the sort: P1 seq-radix is 3.9 ms extract,
-  2.5 ms sort, 2.3 ms CSR out of 11 ms. Check `results/phase7/` before
-  deciding what to port first.)
-
-## Your work: Phases 8–10
-
-### Phase 8 — CUDA port
-
-Port stages 1–3 (extraction, conflict detection, graph construction) to CUDA.
-Do NOT port levelling to the GPU — Phase 7 established that level-synchronous
-parallel scheduling is non-viable on these graphs, and the GPU would hit the
-same barrier-per-level wall harder. Use the sequential sweep for levelling and
-say so.
-
-Port stage by stage, verifying against the CPU reference after each. Partial
-ports are valid intermediate states and make failures easy to localise.
-
-The measurement that matters is the **crossover**: at what super-block size
-does GPU compute beat PCIe transfer cost? Charge transfer time to the GPU.
-Given ~60 ms of total work on one core, transfer may dominate at every testable
-size. If so, that IS the result — report the transfer-cost arithmetic.
-
-### Phase 9 — Skew handling
-
-The OKX hot wallet's nonce key has ~1,500 accesses in a 100k super-block while
-most keys have one or two. One GPU thread per key group would serialise that
-onto a single thread. Measure the unbalanced version FIRST to get a
-before-number, then rebalance, then report the recovery. Without the
-before-number you have a design decision and no result.
-
-### Phase 10 — Full sweep and analysis
-
-Factorial: implementation × super-block size × policy. Warm-ups discarded,
-multiple runs, median reported. Profiler pass (occupancy, memory throughput,
-warp divergence) on the largest super-block.
-
-## Non-negotiables
-
-1. **NO TIMING WITHOUT CORRECTNESS.** Every implementation must produce output
-   bit-identical to the verified CPU reference before any number is reported.
-   The Python schedule validator must accept the output. A fast wrong answer
-   is worse than no answer, and you will not catch it later.
-2. **DETERMINISM.** Identical output across runs and thread/block counts. If a
-   stage is only deterministic after a final sort, do that sort and account
-   for its cost.
-3. **FAIRNESS.** Two baselines exist: seq-std (`std::sort`) and seq-radix.
-   Report speedup against both, labelled. A GPU radix sort beating `std::sort`
-   is partly an algorithm change, not hardware.
-4. **RECORD THE MACHINE.** CPU model, core count, SMT on/off, RAM, GPU model,
-   VRAM, CUDA version, driver. Every timing number is meaningless without it.
-   Note: the Phase 7 scaling curves were measured on an M2 with efficiency
-   cores and are contaminated — they need re-running on your machine
-   (`tools/run_phase7.sh` does this in one command).
-5. **SCOPE EVERY CLAIM.** Two days of Ethereum mainnet, not Ethereum in
-   general. Where a mechanism generalises by argument (nonces are sequential
-   by protocol), say so separately from the measurement.
-
-## Setup
-
-**Requirements:** Linux or WSL2 (the corpus loader uses POSIX `mmap`; native
-Windows is not supported), CMake ≥ 3.16, a C++17 compiler with OpenMP,
-Python 3 with `numpy` and `matplotlib`, and the CUDA toolkit for Phase 8.
-
-**Code:**
+Non-negotiable 1: no timing without correctness, and the Python validator must
+accept the output. `run_dataset.sh` skips both checks. `run_phase8.sh` runs
+them, but only on `corpus/` built by the original ingest:
 
 ```sh
-git clone https://github.com/antonyth18/Conduit-GPU-Detection
-cd Conduit-GPU-Detection
+# put the four CSVs in data/ under these exact names
+data/tx_20260901.csv   data/calldata_20260901.csv
+data/tx_20260913.csv   data/calldata_20260913.csv
+
+python3 ingest.py                 # builds corpus/ (no arguments = original path)
+python3 verify_corpus.py
+python3 report_oracle.py          # builds oracle_ref/, needed by the validator
+tools/run_phase8.sh --profile     # 2 + 7 runs; --profile covers the Phase 10 profiler pass
 ```
 
-**Data and corpus:** none of the data is in git (`data/`, `corpus/` and
-`oracle_ref/` are git-ignored). Get the four CSV exports (~1 GB) from me and
-put them in `data/`:
+Then check, in `results/phase8/<host>-real/`:
+- `identical.txt` ends with `ALL IDENTICAL`;
+- `validator.txt` ends with `ALL CHECKS PASSED`.
 
-```
-data/tx_20260901.csv        data/calldata_20260901.csv
-data/tx_20260913.csv        data/calldata_20260913.csv
-```
+`run_phase8.sh` doesn't stop if either of those fails, so read both before
+trusting any timing.
 
-Then build the corpus (~181 MB) and the oracle reference slices:
+`run_phase8.sh` only covers the standard 10k–100k super-blocks. For the
+250k / 500k / 1M / full-day sizes, re-run `tools/run_dataset.sh` too:
+- without `--quick`;
+- after setting `RUNS=7; WARMUP=2` at line 21.
 
-```sh
-python3 ingest.py           # writes corpus/
-python3 verify_corpus.py    # Phase 1 checks
-python3 report_oracle.py    # writes oracle_ref/, needed by tools/verify_cpp.py
-```
+## Fix 3: headline wall time, not the sum of stages
 
-`superblocks.json` is in git and pinned by SHA-256 to the corpus; the loaders
-refuse a corpus that doesn't match, so a successful load confirms your corpus
-is identical to ours.
+`report_gpu.py` uses `t_e2e_ms`, the sum of the GPU stage timings, for the
+speedup table, the crossover and the figure. Total wall time (`t_wall_ms`) is
+**11–35% higher**.
+- The gap is probably device memory allocation, which the CPU timings include.
+  Please confirm what it is.
+- Use `t_wall_ms` for the headline speedups and the crossover, and keep
+  `t_e2e_ms` as the breakdown.
+- On the current data this moves the Sep 1 P2/P3 crossover against seq-radix
+  from 1k to 2k. Nothing else changes.
 
-**Build:**
+## Fix 4: tidy the results folders
 
-```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j
-```
+- Put the new results in `results/phase8/<host>-real/` (what `run_phase8.sh`
+  writes) and `results/phase8/<host>-real-large/` for the `run_dataset.sh` run.
+- No spaces in folder names (`… Test2`).
+- Sucheth's first run is committed twice, under `results/sucheth-…/` and
+  `results/phase8/sucheth-…/`. Keep one copy.
+- Drop the copies of the Phase 6 figures and `phase6_summary.md` from the
+  results folder; they already live in `results/`.
+- The no-calldata runs can stay, labelled "no calldata: P2/P3 collapse to P1"
+  in their folder names or a README.
 
-The CMake output should report OpenMP as found; `-DCONDUIT_OPENMP=OFF`
-builds without it.
+## Still open from the first review
 
-**Verify your setup** — all of these must pass before you change anything:
+1. **README.md framing needs agreement before it's pushed further.** The
+   project's contribution is characterisation, not a speedup over prior work.
+   - The title and intro reframe the project as "parallel transaction
+     execution" that "actually runs them in parallel".
+   - "DAG dataflow (ours)… a 5.5× better schedule" claims a standard technique
+     as ours.
+   - The headline "8–17× faster" is against seq-std and from synthetic data,
+     read off a figure. Use the real-data numbers from Fixes 1–3, against
+     both baselines and OpenMP.
+   - The execution "measurement" uses a toy state machine where work is
+     proportional to gas. Label it as a model, not real execution.
+   - "Scales further, up to the ~11× ceiling" is a prediction; mark it as one.
+2. **Settle the emulation contradiction.**
+   `results/phase8/sucheth-…/README.md` says the GPU wasn't visible and the
+   GPU rows are emulation, but `bench.log` says `backend cuda`. Confirm which
+   is true and correct the README.
+3. **Update findings.md Phase 8.** It still says "no GPU timing is reported
+   yet". Replace that once Fixes 1–3 are done, and keep the original sentence
+   with a correction note (see the corrections log at the top of findings.md
+   for the format).
+   - The Phase 8b section uses the no-calldata export. Either re-run it on
+     the calldata corpus or say clearly in the section that P2/P3 equal P1
+     there.
+4. **File modes.** `48d9b28` marked 57 files executable (`100644 → 100755`).
+   Run `git config core.fileMode false` on Windows/WSL, and restore the modes:
+   `git ls-files -s | awk '$1=="100755"{print $4}'`, then `chmod 644` on
+   everything that isn't a script.
 
-```sh
-build/conduit_tests                                    # 29 C++ tests, "0 failed checks"
-python3 -m unittest test_access_sets test_superblocks test_oracle
-python3 tools/verify_cpp.py                            # C++ vs Python oracle: "ALL CHECKS PASSED"
-python3 tools/verify_cpp.py --impl omp --threads 8 --level kahn
-build/conduit_bench identical                          # every super-block: "ALL IDENTICAL"
-```
+## Reminders
 
-**Re-run Phase 7 on your machine** (needed for non-negotiable 4):
-
-```sh
-tools/run_phase7.sh                                    # results/phase7/<host>/
-python3 report_openmp.py results/phase7/<host>         # summary.md + figures
-```
-
-## Where things are
-
-| Path | What |
-|---|---|
-| `findings.md` | Research log, phase by phase, with the corrections log |
-| `ingest.py`, `access_sets.py`, `superblocks.py` | Python: corpus, policies, super-blocks |
-| `oracle.py`, `compare.py` | Brute-force oracle, schedule validators, edge-set comparison |
-| `include/conduit/`, `src/` | C++ pipeline: `pipeline.cpp` (sequential), `pipeline_omp.cpp`, `radix.cpp` |
-| `src/detail.hpp` | The shared reduced edge rule (`walk_group`) — reuse it, don't re-derive it |
-| `tools/conduit_run.cpp` | Run the pipeline on one or all super-blocks (`--impl`, `--threads`, `--level`, `--dump`) |
-| `tools/conduit_bench.cpp` | `identical` (bit-identity sweep) and `scale` (timing sweep, CSV) |
-| `tools/verify_cpp.py` | Feeds C++ dumps to the Python validators; extra flags pass to `conduit_run` |
-| `results/` | Phase 6 tables and figures; `results/phase7/<host>/` per machine |
-
-## Boundaries
-
-- **You own:** `cuda/`, Phase 8–10 benchmarking code, `findings.md` sections
-  for 8–10.
-- **I own:** [TODO: whatever you're keeping — router decoding? the write-up?]
-- **Shared:** the C++ pipeline. Coordinate before changing it; if you find a
-  bug, fix it in the sequential path and re-verify against the oracle rather
-  than patching around it in GPU code.
-
-## Open questions worth your judgement
-
-- Does the stages 1–3 OpenMP crossover (~10–20k on the M2) hold on real cores?
-- Does the GPU ever beat a well-parallelised OpenMP run, at any testable size?
-- How much does skew rebalancing actually recover?
-
-## Ask me before
-
-- Changing the conflict rule, the edge-reduction rule, or the policies
-- Re-running anything that would invalidate Phase 6's 2,208-run results
-- Framing a result as beating prior work
+- **Scope every claim:** two days of Ethereum mainnet, on one laptop GPU
+  (RTX 4050, 6 GB).
+- **Report speedups against seq-std, seq-radix and OpenMP, labelled.** Part of
+  any gain over seq-std is the change to radix sort, not the hardware.
+- **Ask before changing** the conflict rule, the edge-reduction rule or the
+  policies, before re-running anything that would change Phase 6's results,
+  and before framing a result as beating prior work.

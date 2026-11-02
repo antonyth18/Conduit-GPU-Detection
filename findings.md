@@ -20,6 +20,8 @@ section with a **Correction** note beside it, so the history remains readable.
 | C7 | `0x5594…ed53` is "the busiest sender", described as an incidental address. | Phases 2, 3, 6 | Phase 6 identity update | **Reinterpretation, not a numeric change.** The address is an exchange hot wallet (Etherscan tag "OKX: Hot Wallet 5"). Every one of its 46,379 transactions in the corpus is a USDT `transfer()`. Withdrawal batching through one account with a strictly sequential nonce is a structural mechanism, not a quirk of these two days. |
 
 | C8 | The deepest dip's dominant selector `0x4a21a2df` is "unidentified", so whether it is a mint is "not established". | Phase 6 identity update (C6) | Phase 6 selector lookup | **Resolved: it is a mint.** 4byte.directory (accessed 2026-10-31) lists exactly one signature for `0x4a21a2df`: `mint((bytes32,bytes32[]),uint256,address,bytes)`, entry 860752. The `(bytes32, bytes32[])` argument has the shape of a Merkle allowlist proof. Together with the contract's NFT-style functions, the deepest dip is a **launch-day NFT mint on Broker Boy**. The first draft's "mint storm" was right for this dip; C6 over-corrected on that point. C6's other conclusions stand: it is a transient launch, and its contention is assumed at contract granularity. |
+| C9 | "Sorting takes 60–70% of the time … The parallel phases should focus on the sort first." | Phase 5 | Phase 7 | **True only for `std::sort`.** With a sequential LSD radix sort, the sort is 4–7x faster and falls to **23% (P1) and 39–43% (P2, P3)** of a 100k super-block. Extraction is then as large as the sort, the larger of the two under P1 (3.9 ms vs 2.5 ms). No single stage dominates the fair baseline. |
+| C10 | Parallel levelling "will need frontier-based relaxation instead", which "does more total work than the sequential sweep". | Phase 5 | Phase 7 | **Both parts wrong.** Frontier (Kahn) levelling does *the same* work, one relaxation per edge, but needs one synchronised round per level: 1,700–21,000 rounds. It is **2.6–5.2x slower than the sweep on one thread and up to 3,400x slower at 16**, getting slower with every added thread. Bellman-Ford, the variant that does more work (rounds × m relaxations), is slower still. Levelling should stay sequential: it is under 1 ms. |
 
 **How the explanation of the deepest dip evolved.** It was revised twice,
 then resolved:
@@ -394,6 +396,10 @@ discarded warm-up runs.
 - **Levelling** is one ascending sweep over the successor CSR, which is exact
   and optimal sequentially. The OpenMP and CUDA versions will need
   frontier-based relaxation instead, and that difference must be reported.
+  > **Correction (C10).** Phase 7 measured frontier relaxation: it gives
+  > identical levels but is far slower than the sweep at every thread count,
+  > because it needs one barrier-separated round per level. The parallel
+  > versions keep the sequential sweep; see Phase 7.
 
 ### Verification
 
@@ -488,6 +494,9 @@ All times are in ms.
 - **Sorting takes 60–70% of the time** at every size and policy. Building
   the CSR is second (sorting and deduplicating edges); detection and
   levelling together are under 10%.
+  > **Correction (C9).** This holds for `std::sort`. Against a sequential
+  > radix sort the sort is 23–43% of the time and extraction is comparable;
+  > see Phase 7.
 - **The parallel phases should focus on the sort first.** Levelling is the
   cheapest stage sequentially but is the one that needs a different
   algorithm in parallel.
@@ -500,6 +509,9 @@ All times are in ms.
   it against a sequential radix sort too, or state the change of algorithm.
 - **Account for frontier-based levelling.** It does more total work than the
   sequential sweep, and that also has to be reported.
+  > **Correction (C10).** Kahn's frontier levelling does the same number of
+  > relaxations as the sweep (m); its cost is synchronisation, not work.
+  > Bellman-Ford does more work (rounds × m). Phase 7 reports both.
 - **Take the final timings on the Linux GPU machine.** The M2 mixes
   performance and efficiency cores, so these sequential numbers are for
   development only; the final comparison needs CPU and GPU on one machine.
@@ -911,6 +923,217 @@ These two biases point in opposite directions, so neither can be assumed to
 cancel the other. The next step that would most tighten the answer is
 decoding router calldata to recover pool addresses. That would also close
 the gap between P3's measured median and the ~65x nonce bound.
+
+## Phase 7 — OpenMP pipeline
+
+All four stages were ported to OpenMP and checked for bit-identical output.
+Each stage can be selected at runtime (`--impl`, `--threads`, `--level`,
+`--schedule`). A sequential radix sort was added as the second baseline.
+
+> **Development numbers only.** Every timing in this section comes from the
+> development machine: an Apple M2 with 4 performance and 4 efficiency cores,
+> no SMT, 8 GB of RAM, macOS 14.5, and no thread pinning available. At 16
+> threads the 8 cores are oversubscribed 2x. The final scaling curves come
+> from the benchmark machine via `tools/run_phase7.sh` (see `handover.md`).
+> The correctness results and counters below don't depend on the machine.
+
+- **Code:**
+  - `src/pipeline_omp.cpp`: parallel extraction, detection, CSR build, and
+    Kahn and Bellman-Ford levelling.
+  - `src/radix.cpp`: sequential and parallel LSD radix sort.
+  - `src/detail.hpp`: the reduced edge rule, shared by all paths.
+- **Tools:** `tools/conduit_bench.cpp` (`identical`, `scale`) and
+  `tools/membw.cpp`.
+- **Analysis:** `report_openmp.py`.
+- **Results:** `results/phase7/dev-m2/` holds `scale.csv`, `summary.md`,
+  `machine.txt`, `membw.txt`, `validator.txt` and three figures.
+
+### Correctness first
+
+- **Bit-identical on every super-block.** The output was compared with seq-std
+  on all 736 super-blocks × 3 policies: seq-radix, and OpenMP at 1, 2, 4 and 8
+  threads with Kahn levelling. Bellman-Ford was checked on every 25th
+  super-block. Sorted records, edges, CSR and levels all matched:
+  **11,130 comparisons, 0 mismatches.** The radix sort is stable, and each
+  parallel stage writes through prefix-sum offsets, so the output can't depend
+  on thread count.
+- **The Python validator accepts the OpenMP output** at 8 threads with Kahn
+  levelling: **54 of 54 checks.**
+  - 18 checks are the 6 Phase 4 slices × 3 policies. They match the oracle's
+    levels exactly, and their edges are an implied subset.
+  - 36 checks are the 12 median super-blocks × 3 policies. They pass
+    `validate_fast` and stay at or above the nonce floor.
+- **The C++ unit tests pass: 29.** Phase 7 added tests for:
+  - radix sort against `std::sort`;
+  - parallel radix sort at every thread count;
+  - parallel detection against the sequential and brute-force versions;
+  - Kahn and Bellman-Ford on deep graphs (a chain of 5,000, a fan, a lattice,
+    random DAGs);
+  - the whole pipeline across thread counts.
+- **Peak memory is about 0.2 GB** (RSS 200–218 MB, mostly the memory-mapped
+  corpus). The brief's limit is 3 GB.
+
+### The fair baseline: radix sort
+
+At 100k transactions, a median super-block averaged over the two days (ms):
+
+| Policy | seq-std sort | seq-radix sort | Sort speedup | seq-std total | seq-radix total | End-to-end speedup |
+|---|---:|---:|---:|---:|---:|---:|
+| P1 | 17.89 | 2.53 | 7.1x | 33.73 | 10.98 | 3.07x |
+| P2 | 41.69 | 9.98 | 4.2x | 68.94 | 25.89 | 2.66x |
+| P3 | 41.79 | 9.97 | 4.2x | 60.83 | 23.00 | 2.65x |
+
+- **Changing the algorithm alone is worth 2.7–3.1x** on one core, with no
+  parallelism at all.
+- Any parallel speedup quoted only against seq-std would carry this factor.
+  **seq-radix is the baseline every OpenMP and CUDA claim must also beat.**
+  See correction C9.
+
+### Levelling: parallel scheduling does not work on these graphs
+
+Each count is the mean of the two days' 100k median super-blocks. Kahn and
+Bellman-Ford use 1–16 threads.
+
+| Policy | Edges m | Levels L | Sweep ms | Kahn ms, 1 / 4 / 16 threads | Bellman-Ford ms, 1 / 4 / 16 threads | Kahn µs per round, 2 / 8 / 16 threads |
+|---|---:|---:|---:|---:|---:|---:|
+| P1 | 139,500 | 19,846 | 0.69 | 3.6 / 460 / 2,319 | 13,040 / 4,286 / 6,931 | 14 / 55 / 117 |
+| P2 | 167,210 | 2,474 | 0.99 | 2.8 / 60 / 275 | 1,956 / 582 / 849 | 15 / 57 / 111 |
+| P3 | 115,601 | 1,737 | 0.82 | 2.1 / 43 / 200 | 1,154 / 366 / 605 | 15 / 58 / 115 |
+
+- **The counters match the theory exactly** on every super-block:
+  - the sweep relaxes each edge once;
+  - Kahn relaxes each edge once, with 2m + n atomics, in exactly L rounds;
+  - Bellman-Ford relaxes about L × m times (2.77 billion for P1) in L rounds.
+- **Kahn does no more work than the sweep, yet is far slower.** Its cost is
+  rounds, not work. Every level needs two barriers and a scheduling pass.
+  That costs 14 µs per round at 2 threads, rising to about 115 µs at 16, the
+  same for all three policies. Work per round is tiny: Phase 5 found that
+  most levels hold fewer than 32 transactions.
+  - So Kahn's time is about L × barrier cost, and gets worse with every
+    thread added.
+  - At 1 thread there are no barriers to wait on, and it is still 2.6–5.2x
+    slower than the sweep, because of the atomics and frontier bookkeeping.
+- **Bellman-Ford is the worst of the three.** It does L times the work. Four
+  threads help (3x faster than 1 thread), but at its best it is still about
+  450–6,200x slower than the sweep.
+- **On the M2, more threads make levelling slower.** Barriers on a pinned
+  Linux machine should be cheaper, perhaps 1–5 µs (an estimate, not
+  measured). Even then, 1,700–21,000 rounds would cost 2–100 ms, against
+  under 1 ms for the sweep.
+  - The cause is depth, which is a property of the workload. The deep P1
+    graphs and the nonce chains under every policy (Phase 6) are what make
+    the graphs deep.
+  - This is the same mechanism a GPU port would face, so Phase 8 should not
+    port levelling (see `handover.md`).
+
+### Stages 1–4 do scale, modestly
+
+Stage times at 100k transactions, dynamic schedule (ms):
+
+| Policy | Configuration | Extract | Sort | Detect | CSR | Stages 1–4 | Speedup vs seq-radix |
+|---|---|---:|---:|---:|---:|---:|---:|
+| P1 | seq-radix | 3.91 | 2.53 | 1.51 | 2.33 | 10.29 | 1.00 |
+| P1 | omp, 1 thread | 2.35 | 3.89 | 2.34 | 8.15 | 16.86 | 0.61 |
+| P1 | omp, 4 threads | 1.25 | 1.54 | 0.92 | 2.73 | 6.59 | **1.56** |
+| P1 | omp, 8 threads | 1.34 | 1.73 | 0.90 | 2.80 | 6.93 | 1.49 |
+| P2 | seq-radix | 7.50 | 9.98 | 3.23 | 4.01 | 24.90 | 1.00 |
+| P2 | omp, 8 threads | 2.06 | 4.56 | 1.67 | 3.71 | 11.95 | **2.08** |
+| P3 | seq-radix | 7.44 | 9.97 | 2.78 | 2.00 | 22.18 | 1.00 |
+| P3 | omp, 8 threads | 2.09 | 4.66 | 1.60 | 2.87 | 11.19 | **1.98** |
+
+- **The OpenMP code at 1 thread costs about 1.6x seq-radix.** The parallel
+  algorithms do extra passes:
+  - the parallel sort builds per-thread histograms;
+  - the parallel CSR build flags duplicates, prefix-sums and compacts them,
+    then binary-searches the row offsets. That makes it 3.5x the sequential
+    CSR time at 1 thread.
+  - Parallel extraction is faster even at 1 thread (2.35 vs 3.91 ms),
+    probably because it writes into fixed 7-slot buffers instead of growing a
+    vector. That explanation was not profiled.
+- **Scaling peaks at 4 threads (P1) or 8 threads (P2, P3),** at 1.5–2.1x
+  over seq-radix.
+  - At 16 threads (2x oversubscribed) every stage gets slower.
+  - The probable cause is the M2's asymmetry: the efficiency cores set the
+    pace at every barrier.
+- **Memory bandwidth saturates early.** STREAM triad gives 58 GB/s on 1
+  thread, 71 GB/s at 2 and 4, and falls to 60 GB/s at 8. That limits any
+  pass that runs out of cache.
+
+### End to end, against both baselines
+
+At 100k transactions, the best thread count (dynamic schedule):
+
+| Policy | omp-hybrid ms (threads) | vs seq-std | vs seq-radix | omp-kahn, best ms (threads) | omp-kahn vs seq-radix |
+|---|---:|---:|---:|---:|---:|
+| P1 | 7.08 (4) | 4.77x | **1.55x** | 20.45 (1) | 0.54x |
+| P2 | 12.54 (8) | 5.50x | **2.07x** | 43.38 (1) | 0.60x |
+| P3 | 11.52 (8) | 5.28x | **2.00x** | 38.45 (1) | 0.60x |
+
+- **omp-hybrid** runs stages 1–4 in parallel and levels with the sequential
+  sweep. **omp-kahn** is the pipeline the brief specified, with every stage
+  parallel.
+- **omp-kahn loses to seq-radix at every thread count and every size.** Its
+  best configuration is always 1 thread, where the barriers have nothing to
+  wait for. Beyond that, levelling dominates: at 8 threads P1 takes 1,106 ms
+  end to end.
+- **Of the 4.8–5.5x against seq-std, about 2.7–3.1x is the change of sorting
+  algorithm.** Parallelism contributes the remaining 1.5–2.1x.
+
+### Loop schedules
+
+Dynamic, static and guided schedules were compared on the detection loops.
+The table shows 8 threads at 100k.
+
+| Policy | Detect ms, dynamic / static / guided | Imbalance (max ÷ mean busy time), dynamic / static / guided |
+|---|---:|---:|
+| P1 | 0.85 / 0.90 / 1.00 | 1.40 / 1.56 / 2.53 |
+| P2 | 1.63 / 1.61 / 1.55 | 1.10 / 1.15 / 1.47 |
+| P3 | 1.52 / 1.69 / 1.48 | 1.09 / 1.18 / 1.42 |
+
+- **Dynamic gives the most even load,** especially under P1. The likely
+  cause is that a few large key groups (contract-wide keys) unbalance static
+  chunks; that is an interpretation, not measured per group.
+- **The effect on time is small:** within about 15% on a stage that takes
+  1–2 ms. The schedule chosen by the best end-to-end configurations varies
+  between dynamic, static and guided, which is noise.
+- **Skew hasn't hurt the CPU yet,** because a key group with 1,500 accesses
+  is still a small share of one thread's chunk. Phase 9 tests whether it
+  matters at GPU thread granularity.
+
+### Crossover
+
+The best OpenMP configuration (any thread count, any schedule) against
+seq-radix:
+
+| Size | P1 omp-hybrid | P2 omp-hybrid | P3 omp-hybrid | omp-kahn, any policy |
+|---:|---:|---:|---:|---:|
+| 1k | 0.70x | 0.67x | 0.68x | 0.62–0.67x |
+| 5k | 0.65x | 0.79x | 0.77x | 0.58–0.64x |
+| 10k | 0.76x | **1.15x** | **1.11x** | 0.53–0.64x |
+| 20k | **1.05x** | 1.43x | 1.41x | 0.54–0.61x |
+| 100k | 1.55x | 2.08x | 2.00x | 0.55–0.60x |
+
+- **OpenMP pays off from 10k transactions (P2, P3) and 20k (P1)** on the M2.
+  Below 5k, thread start-up and the parallel algorithms' extra passes cost
+  more than they save, and the best configuration is 1 thread.
+- **The crossover sits at the scale of rollup batches, not single blocks.**
+  A single mainnet block, averaging 281 transactions on Sep 1 and 206 on
+  Sep 13 (`corpus/meta.json`), is far below it.
+- **Kahn never crosses over.** The full table is in
+  `results/phase7/dev-m2/summary.md` section 6.
+
+### What Phase 7 establishes
+
+- **The schedule can be computed in parallel with output identical to the
+  sequential pipeline,** across 11,130 comparisons.
+- **Levelling is the stage that doesn't parallelise.** That is because the
+  graphs are deep (thousands of levels, mostly under 32 transactions each),
+  not because of a weak implementation. Kahn does the minimum work and
+  still loses to synchronisation. On these two days, the sequential sweep in
+  under 1 ms is the right levelling algorithm for any parallel version.
+- **Stages 1–4 give 1.5–2.1x over a fair sequential baseline on the M2,**
+  from about 10–20k transactions upward. Real cores with pinning should do
+  better; the benchmark machine will show how much.
 
 ## Phase 8 — CUDA pipeline (implementation; GPU numbers pending)
 

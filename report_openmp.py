@@ -211,14 +211,14 @@ def main():
         rs = tab.cells.get((big, p, "seq-radix", 1, "-"))
         if not rs:
             continue
-        m, L = rs[0]["edges"], rs[0]["levels"]
+        m, L = np.mean([r["edges"] for r in rs]), np.mean([r["levels"] for r in rs])
         def line(name, var, t, s):
             lv = tab.get(big, p, var, t, s, "t_level_ms")
             rel = tab.get(big, p, var, t, s, "relaxations")
             at = tab.get(big, p, var, t, s, "atomics")
             rd = tab.get(big, p, var, t, s, "rounds")
             per = f"{lv * 1e3 / rd:.1f}" if rd > 1 else "–"
-            out(f"| {p} | {m:,} | {L:,} | {name} | {t} | {ms(lv)} | {rel:,.0f} | {at:,.0f} | "
+            out(f"| {p} | {m:,.0f} | {L:,.0f} | {name} | {t} | {ms(lv)} | {rel:,.0f} | {at:,.0f} | "
                 f"{rd:,.0f} | {per} |")
         line("sweep", "seq-radix", 1, "-")
         for t in threads:
