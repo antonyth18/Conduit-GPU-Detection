@@ -13,7 +13,7 @@ Everything for the IT 301 project is in this folder.
 | `GPU_README.md` | CUDA design and the GPU tools in detail |
 | `data/` | The four input CSVs: transactions and calldata for 2026-09-01 and 2026-09-13 |
 | `data_original_export/` | The first BigQuery export of 2026-09-01 (same day as `tx_20260901.csv`, kept for the record; not read by the scripts) |
-| `presentation/` | Slide decks and the scripts that generated them |
+| `presentation/` | Final slide deck and the script that generates it (`generate_final_ppt_v3.py`) |
 | `src/`, `include/`, `tools/`, `tests/`, `*.py` | Source code |
 
 ## Bring in your latest results from Ubuntu

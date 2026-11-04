@@ -8,3 +8,4 @@ build/
 xcheck/
 corpus_synth/
 corpus_eth/
+*.sqlite
