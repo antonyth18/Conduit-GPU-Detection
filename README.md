@@ -70,10 +70,10 @@ Block-STM [Gelashvili et al. 2023]. Every algorithm used is published work, list
 > i5-13420H (12 hardware threads), NVIDIA GeForce RTX 4050 Laptop GPU (6 GB),
 > CUDA 12.6, WSL2, on AC power. **2 warm-up + 7 measured runs, median**; super-blocks
 > above 250k transactions use 1 + 3 runs per configuration. All five correctness
-> gates passed before any timing (section 6). Windows was on the *Balanced* power
-> plan, not *Best performance*; that mainly affects the small sizes (see crossover).
-> A second laptop (i7-13620H, same GPU model, 1 + 2 runs) gave the same picture at
-> large sizes: `results/phase8/sucheth-katte-ASUS-TUF-Gaming-real-large-quick/`.
+> gates passed before any timing (section 6). Windows power mode: Best performance.
+> A second laptop on **native Ubuntu** (i7-13620H, same GPU model, 2 + 7 runs, all
+> gates passed) agrees within 1–11% at full day and gives the crossover below:
+> `results/phase8/sucheth-katte-ASUS-TUF-Gaming-F15-FX507VU-FX507VU-real/`.
 > Scope: two days of Ethereum mainnet, one laptop GPU.
 
 ### Phase 8: cost of computing the schedule, wall time, transfers charged
@@ -90,12 +90,13 @@ Block-STM [Gelashvili et al. 2023]. Every algorithm used is published work, list
 
 - **Read the speedups against seq-radix and OpenMP.** Part of the gain over seq-std
   comes from switching to radix sort, not from the hardware (finding C9).
-- **Crossover.** With transfers charged, the GPU beats seq-radix and the best OpenMP
-  run from about **10k–20k transactions** on this machine (40k for Sep 13 under P1).
-  Below that, the GPU's fixed cost per call (launches, synchronisations, small
-  copies: 0.5–1.2 ms here) dominates. On the second laptop that cost was
-  0.15–0.19 ms and the crossover 2k–5k, so **the crossover depends on the machine**;
-  the large-size speedups agree between the two.
+- **Crossover.** With transfers charged, on native Linux the GPU beats seq-radix
+  from **2k transactions (P2/P3) and 5k (P1)**, and the best OpenMP run from 1k–2k,
+  on both days. Below that, the GPU's fixed cost per call (launches,
+  synchronisations, small copies: 0.15–0.20 ms) dominates. **Under WSL2 that cost is
+  about 7x higher** (an empty launch + sync takes 31.5 µs against 4.6 µs natively),
+  which moves the crossover to 10k–20k (40k for Sep 13 under P1) on the WSL2 laptop.
+  The large-size speedups agree between the two (findings.md C13).
 - **Transfers.** At the full day, moving the input (80.5 MB, 6.4 ms at 10.1 GB/s
   pinned) and the graph back (27–32 MB, 2.7–3.6 ms) costs **14–19% of the GPU wall
   time**. Staging the input into pinned host memory adds another 8–13 ms and copying

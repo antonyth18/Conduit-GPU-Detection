@@ -53,6 +53,14 @@ machine_info() {
     command -v powerprofilesctl >/dev/null && echo "powerprofilesctl: $(powerprofilesctl get 2>/dev/null)"
     if grep -qi microsoft /proc/version 2>/dev/null && command -v powershell.exe >/dev/null; then
       echo "Windows power plan: $(powershell.exe -NoProfile -Command 'powercfg /getactivescheme' 2>/dev/null | tr -d '\r')"
+      # The Settings power mode is an overlay on the plan; powercfg does not show it
+      mode=$(powershell.exe -NoProfile -Command "(Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Power\User\PowerSchemes' -ErrorAction SilentlyContinue).ActiveOverlayAcPowerScheme" 2>/dev/null | tr -d '\r')
+      case "$mode" in
+        ded574b5-45a0-4f42-8737-46345c09c238) mode="$mode (Best performance)" ;;
+        961cc777-2547-4f9d-8174-7d86181b8a7a) mode="$mode (Best power efficiency)" ;;
+        00000000-0000-0000-0000-000000000000|"") mode="${mode:-unset} (Balanced)" ;;
+      esac
+      echo "Windows power mode (on AC): $mode"
       echo "Windows AC power: $(powershell.exe -NoProfile -Command '(Get-CimInstance -Namespace root/wmi -ClassName BatteryStatus -ErrorAction SilentlyContinue).PowerOnline' 2>/dev/null | tr -d '\r')"
     fi
     echo

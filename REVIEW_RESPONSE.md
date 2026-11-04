@@ -24,6 +24,11 @@ Phase 6's results are untouched (see Fix 2).
   performance* (recorded in `machine.txt`). It shows at small sizes (the GPU's
   fixed cost per call is 0.5–1.2 ms here against 0.15–0.19 ms on the first
   laptop); full-day results agree with the first laptop within 1–6%.
+  > **Note added after the native-Linux rerun (findings.md C13).** The Windows
+  > power *mode* was Best performance; `machine.txt` recorded only the power
+  > *plan*. The small-size gap is WSL2's per-call latency (31.5 µs against
+  > 4.6 µs on native Ubuntu), not the power setting. `tools/lib_machine.sh` now
+  > records the power mode too.
 
 ## Fix 2: Python validator and full bit-identity sweep
 
@@ -76,7 +81,7 @@ Phase 6's results are untouched (see Fix 2).
 | Before | After |
 |---|---|
 | `results/sucheth-…-FX507VU/` and `results/phase8/sucheth-…/` (same run twice) | one copy: `results/phase8/sucheth-katte-ASUS-TUF-Gaming-real-large-quick-no-calldata/` |
-| `results/dataset/sucheth-…-FX507VU Test2/` (space in name) | `results/phase8/sucheth-katte-ASUS-TUF-Gaming-real-large-quick/` |
+| `results/dataset/sucheth-…-FX507VU Test2/` (space in name) | `results/phase8/sucheth-katte-ASUS-TUF-Gaming-real-large-quick/` (since moved into `sucheth-katte-ASUS-TUF-Gaming-real-data-test1/`, and superseded by the 2 + 7 run in `sucheth-katte-ASUS-TUF-Gaming-F15-FX507VU-FX507VU-real/`) |
 | `results/dataset/cloud-2vcpu-gpu-emulated/` | `results/phase8/cloud-2vcpu-emulated-no-calldata/` |
 | Phase 6 figure copies and `phase6_summary.md` inside results folders | removed (they live in `results/`) |
 

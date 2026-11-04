@@ -338,7 +338,7 @@ expensive transaction.
 ### First results on this file (dev container, 2 vCPU, GPU emulated, no calldata)
 
 Kept for the record; see `findings.md` C11 and C12. The laptop results with calldata are
-in `README.md` and `results/phase8/sucheth-katte-ASUS-TUF-Gaming-real-large-quick/`.
+in `README.md` and `results/phase8/sucheth-katte-ASUS-TUF-Gaming-F15-FX507VU-FX507VU-real/`.
 
 | policy | batches (full day) | per-key lower bound | model speedup, level batches (W=∞) | model speedup, DAG dataflow (W=∞) | measured DAG, 2 threads |
 |---|---:|---:|---:|---:|---:|

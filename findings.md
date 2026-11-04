@@ -24,6 +24,7 @@ section with a **Correction** note beside it, so the history remains readable.
 | C10 | Parallel levelling "will need frontier-based relaxation instead", which "does more total work than the sequential sweep". | Phase 5 | Phase 7 | **Both parts wrong.** Frontier (Kahn) levelling does *the same* work, one relaxation per edge, but needs one synchronised round per level: 1,700–21,000 rounds. It is **2.6–5.2x slower than the sweep on one thread and up to 3,400x slower at 16**, getting slower with every added thread. Bellman-Ford, the variant that does more work (rounds × m relaxations), is slower still. Levelling should stay sequential: it is under 1 ms. |
 | C11 | "No GPU timing is reported here yet"; the cloud runs were labelled "GPU emulated", and one RTX 4050 folder was read as CPU-only. | Phase 8 | Phases 8–10 results | **Settled.** The RTX 4050 laptop runs used the CUDA backend (`gpu_info.txt`: backend cuda; 852 and 1,710 verify checks passed on the GPU). Only the cloud 2-vCPU folder is emulated; it is now named `cloud-2vcpu-emulated-no-calldata` and its GPU columns are correctness evidence, never timings. The final GPU numbers (Phases 8–10 below) come from a 2 warm-up + 7 run on a second RTX 4050 laptop; the first laptop's 1 + 2 run agrees at large sizes. |
 | C12 | Phase 8b: "P2/P3 ≈ P1" on the user dataset. | Phase 8b | Phases 8–10 results | **A property of the first export, not of the policies.** That export had no calldata, so every ERC-20 call fell back to contract granularity. With calldata for both days, full-day batches fall from 401,223 (P1) to 89,380 (P2) and 42,309 (P3) on Sep 1, and from 269,610 to 30,150 and 21,378 on Sep 13. |
+| C13 | "Windows was on the *Balanced* power plan"; the crossover is "10k–20k transactions" and "a property of the machine and its power state". | Phases 8–10 results | Native-Linux rerun | **The cause is WSL2, not the power setting.** The Windows *power mode* was Best performance (team report); `machine.txt` recorded only the power *plan*, which shows Balanced whatever the mode. A rerun on native Ubuntu with the same GPU model measured a launch-and-wait round trip of **4.6 µs against 31.5 µs under WSL2**. There the GPU beats seq-radix from **2k transactions (P2/P3) and 5k (P1)**, and the best OpenMP run from 1k–2k, on both days. Full-day results agree between the machines within 1–11%. |
 
 **How the explanation of the deepest dip evolved.** It was revised twice,
 then resolved:
@@ -1185,8 +1186,14 @@ mappings), `verify`, `identical` on every super-block, and the Python validator.
 Caveat: Windows was on the *Balanced* power plan (recorded in `machine.txt`), not
 *Best performance* as the review asked. The large-size results agree with the first
 laptop run (i7-13620H, same GPU model, 1 + 2 runs, kept in
-`results/phase8/sucheth-katte-ASUS-TUF-Gaming-real-large-quick/`); the small sizes
+`results/phase8/sucheth-katte-ASUS-TUF-Gaming-real-data-test1/sucheth-katte-ASUS-TUF-Gaming-real-large-quick/`); the small sizes
 do not, see the crossover below.
+
+> **Correction (C13).** The Windows power *mode* was Best performance;
+> `machine.txt` recorded only the power *plan*, which reads Balanced regardless
+> of the mode. The small-size difference comes from WSL2, measured in
+> "Crossover on native Linux" below. The first laptop's 1 + 2 run has since been
+> replaced by a 2 + 7 run on the same machine (`results/phase8/sucheth-katte-ASUS-TUF-Gaming-F15-FX507VU-FX507VU-real/`).
 
 ### Phase 8 — crossover and cost
 
@@ -1205,6 +1212,9 @@ do not, see the crossover below.
   the linear model around the crossover is unreliable on this run ("never" for two
   fits). **The crossover is a property of the machine and its power state; the
   large-size speedups are not.**
+  > **Correction (C13).** The machine dependence is WSL2's cost per GPU call,
+  > not the power state. On native Linux the crossover is 2k–5k against
+  > seq-radix; see the next subsection.
 - **Transfers.** Full day: 80.5 MB H2D in 6.4–6.5 ms and 27–32 MB D2H in
   2.7–3.6 ms, **14–19% of wall**. The PCIe probe measured 10.1 GB/s H2D and
   9.9 GB/s D2H pinned; its prediction for H2D (7.9 ms) is about 20% above the
@@ -1217,6 +1227,46 @@ do not, see the crossover below.
   H2D 6.4, CSR 4.7, D2H 3.6, extract 3.1; the CPU sweep adds 19.1 ms. **The CPU
   sweep is now the largest single part of the wall time**: offloading stages 1–3
   moved the bottleneck to stage 4.
+
+### Crossover on native Linux: the WSL2 effect
+
+Rerun: `results/phase8/sucheth-katte-ASUS-TUF-Gaming-F15-FX507VU-FX507VU-real/`. Intel i7-13620H (16 hardware threads), RTX 4050 Laptop
+GPU, CUDA runtime 13.2, **native Ubuntu 24.04 (no WSL2)**, AC power, both days with
+calldata. 2 warm-up + 7 measured runs (1 + 3 above 250k), current code, all five
+gates passed (39 tests, `stages`, `verify`, `identical` on every super-block, Python
+validator). Machine note: `platform_profile: balanced` and CPU governor `powersave`
+(intel_pstate, which still boosts under load). The review asked for the performance
+profile; if anything this slows the CPU baselines slightly and so favours the GPU a
+little at small sizes.
+
+| | Native Ubuntu (this run) | WSL2 (`Nikhil-PC-real-large/`) |
+|---|---:|---:|
+| Empty kernel launch + sync | **4.6 µs** | 31.5 µs |
+| 4 KB host-to-device copy, pinned | 1.27 GB/s | 0.52 GB/s |
+| GPU wall at 1k transactions | 0.15–0.20 ms | 0.52–0.91 ms |
+
+The pipeline makes 17 launches, 6 host synchronisations and several small copies per
+call, so a per-call cost about 7x higher under WSL2 accounts for its 0.5–0.9 ms floor.
+
+**Crossover (wall time, transfers charged; smallest size from which the GPU wins at
+every larger size), identical on both days:**
+
+| Policy | GPU beats seq-radix from | GPU beats best OpenMP from | Same, under WSL2 |
+|---|---:|---:|---:|
+| P1 | 5k | 2k | 20k / 20k |
+| P2 | 2k | 1k | 10–20k / 20k |
+| P3 | 2k | 1k | 10–20k / 20–40k |
+
+- **At 100k:** GPU 1.93 / 2.50 / 2.27 ms (P1/P2/P3, Sep 1), **3.8 / 8.0 / 6.2×
+  over seq-radix and 2.3 / 4.2 / 3.5× over OpenMP**; Sep 13 4.0 / 6.3 / 6.1× and
+  2.5 / 2.9 / 3.2×.
+- **Full day:** Sep 1 47.6 / 69.1 / 61.6 ms, within 3–11% of the WSL2 run; Sep 13
+  35.6 / 51.8 / 45.2 ms, within 1–3%.
+- **Interpretation.** At small sizes the GPU's cost is fixed per-call latency, and
+  WSL2 multiplies it; at large sizes the work dominates and the environment stops
+  mattering. For a batch of a few thousand transactions, a GPU on native Linux
+  already beats the CPU on this pipeline. Measured on one laptop GPU model; other
+  hardware will move the crossover.
 
 ### Phase 9 — skew
 
