@@ -1,0 +1,46 @@
+date: 2026-11-04T11:51:36Z
+host: sucheth-katte-ASUS-TUF-Gaming-F15-FX507VU-FX507VU
+git: 063a3d0
+run: run_phase8.sh corpus=corpus runs=2+7 threads=1,2,4,8,16 backend=cuda
+OMP_PROC_BIND=close OMP_PLACES=cores
+
+## OS
+Linux sucheth-katte-ASUS-TUF-Gaming-F15-FX507VU-FX507VU 7.0.0-42-generic #42~24.04.1-Ubuntu SMP PREEMPT_DYNAMIC Mon Oct 19 14:43:01 UTC 2 x86_64 x86_64 x86_64 GNU/Linux
+PRETTY_NAME="Ubuntu 24.04.4 LTS"
+NAME="Ubuntu"
+VERSION_ID="24.04"
+VERSION="24.04.4 LTS (Noble Numbat)"
+
+## CPU
+CPU(s):                                  16
+Model name:                              13th Gen Intel(R) Core(TM) i7-13620H
+Thread(s) per core:                      2
+Core(s) per socket:                      10
+Socket(s):                               1
+CPU(s) scaling MHz:                      27%
+CPU max MHz:                             4900.0000
+CPU min MHz:                             400.0000
+L2 cache:                                9.5 MiB (7 instances)
+L3 cache:                                24 MiB (1 instance)
+SMT active: 1
+governor: powersave
+current MHz (cpu0): 517.061
+
+## power (the review asks for performance mode on AC power)
+/sys/class/power_supply/ADP0/online: 1
+/sys/class/power_supply/ucsi-source-psy-USBC000:001/online: 0
+platform_profile: balanced
+
+## memory
+               total        used        free      shared  buff/cache   available
+Mem:            15Gi       4.8Gi       3.8Gi       559Mi       7.4Gi        10Gi
+Swap:          4.0Gi          0B       4.0Gi
+
+## GPU
+name, memory.total [MiB], memory.used [MiB], driver_version, pstate, clocks.current.sm [MHz], clocks.max.sm [MHz], pcie.link.gen.current, pcie.link.gen.max, pcie.link.width.current, pcie.link.width.max, power.draw [W], power.limit [W]
+NVIDIA GeForce RTX 4050 Laptop GPU, 6141 MiB, 15 MiB, 595.99.02, P8, 210 MHz, 3105 MHz, 2, 4, 8, 8, 3.98 W, [N/A]
+nvcc: not on PATH 
+conduit_gpu info: GPU NVIDIA GeForce RTX 4050 Laptop GPU, 20 SMs, 5772 MiB, cc 8.9, driver 13.2, runtime 13.2; backend cuda; OpenMP on
+
+c++ (Ubuntu 14.2.0-4ubuntu2~24.04.1) 14.2.0
+cmake version 3.28.3

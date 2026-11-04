@@ -1,0 +1,13 @@
+conduit_gpu pcie: GPU NVIDIA GeForce RTX 4050 Laptop GPU, 20 SMs, 5772 MiB, cc 8.9, driver 13.2, runtime 13.2; backend cuda; OpenMP on
+       bytes   H2D pinned   D2H pinned H2D pageable D2H pageable   (GB/s, median of 7)
+        4096         1.27         1.64         1.33         0.65
+       16384         4.03         4.74         4.00         1.88
+       65536         8.39         9.27         4.92         3.67
+      262144        11.35        12.12         8.56         6.14
+     1048576        12.32        13.06         8.34         5.66
+     4194304        11.23        10.13         9.50         7.51
+    16777216        11.34        10.13         9.62         8.25
+    67108864        11.29        10.11         8.46         8.32
+   268435456        11.29        10.09         8.58         8.52
+empty kernel launch + sync: 4.6 us; one device->host read (sync round trip): 4.5 us
+wrote results/phase8/sucheth-katte-ASUS-TUF-Gaming-F15-FX507VU-FX507VU-real/pcie.csv

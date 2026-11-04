@@ -1,0 +1,13 @@
+-- conduit: OpenMP 4.5 enabled
+-- conduit: CUDA 13.2.86 enabled, architectures 89
+-- Configuring done (0.1s)
+-- Generating done (0.0s)
+-- Build files have been written to: /home/sucheth-katte/Projects/Conduit-GPU-Detection/build
+[ 48%] Built target conduit
+[ 70%] Built target conduit_tests
+[ 70%] Built target conduit_run
+[ 70%] Built target dump_access
+[ 77%] Built target conduit_trace
+[ 85%] Built target membw
+[ 92%] Built target conduit_bench
+[100%] Built target conduit_gpu

@@ -1,0 +1,38 @@
+Oracle: brute-force O(n^2) reference. Times are informative only.
+
+slice                            pol      edges  levels  floor lv/floor    par  batch min/med/max  validator self-cmp  broken        s
+2026-09-01/10k/099[:500]          P1      5,499      83      8    10.38    6.0     1     2   218     accept    identical rejected    0.1
+2026-09-01/10k/099[:500]          P2        549      16      8     2.00   31.2     1     4   306     accept    identical rejected    0.1
+2026-09-01/10k/099[:500]          P3        450       9      8     1.12   55.6     1    13   319     accept    identical rejected    0.1
+                                     floor = 0x28c6c06298d514db089934071355e5743bf21d60 with 8 tx
+2026-09-01/10k/099[:1000]         P1     28,476     208     17    12.24    4.8     1     2   341     accept    identical rejected    0.3
+2026-09-01/10k/099[:1000]         P2      3,186      55     17     3.24   18.2     1     1   467     accept    identical rejected    0.6
+2026-09-01/10k/099[:1000]         P3      1,497      17     17     1.00   58.8     1    13   561     accept    identical rejected    0.6
+                                     floor = 0x28c6c06298d514db089934071355e5743bf21d60 with 17 tx
+2026-09-01/10k/099[:2000]         P1     99,664     380     26    14.62    5.3     1     2   581     accept    identical rejected    1.1
+2026-09-01/10k/099[:2000]         P2      8,395      68     26     2.62   29.4     1     3   795     accept    identical rejected    2.3
+2026-09-01/10k/099[:2000]         P3      5,533      35     26     1.35   57.1     1    12   993     accept    identical rejected    2.4
+                                     floor = 0x28c6c06298d514db089934071355e5743bf21d60 with 26 tx
+2026-09-13/10k/073[:500]          P1      5,790      99     10     9.90    5.1     1     1   232     accept    identical rejected    0.1
+2026-09-13/10k/073[:500]          P2        660      26     10     2.60   19.2     1     1   309     accept    identical rejected    0.1
+2026-09-13/10k/073[:500]          P3        281      10     10     1.00   50.0     2     6   371     accept    identical rejected    0.1
+                                     floor = 0x28c6c06298d514db089934071355e5743bf21d60 with 10 tx
+2026-09-13/10k/073[:1000]         P1     27,826     218     19    11.47    4.6     1     1   373     accept    identical rejected    0.3
+2026-09-13/10k/073[:1000]         P2      1,820      29     19     1.53   34.5     1     4   530     accept    identical rejected    0.6
+2026-09-13/10k/073[:1000]         P3      1,125      21     19     1.11   47.6     1     4   653     accept    identical rejected    0.6
+                                     floor = 0x559432e18b281731c054cd703d4b49872be4ed53 with 19 tx
+2026-09-13/10k/073[:2000]         P1    114,511     445     26    17.12    4.5     1     1   608     accept    identical rejected    1.1
+2026-09-13/10k/073[:2000]         P2      6,292      39     26     1.50   51.3     1    11   853     accept    identical rejected    2.4
+2026-09-13/10k/073[:2000]         P3      4,035      26     26     1.00   76.9     3    14  1140     accept    identical rejected    2.4
+                                     floor = 0x28c6c06298d514db089934071355e5743bf21d60 with 26 tx
+
+critical path by policy (levels), floor = longest single-sender chain
+day             n     P1     P2     P3  floor  P1/P3  P2/P3 P3/floor
+2026-09-01    500     83     16      9      8   9.22   1.78     1.12
+2026-09-01   1000    208     55     17     17  12.24   3.24     1.00
+2026-09-01   2000    380     68     35     26  10.86   1.94     1.35
+2026-09-13    500     99     26     10     10   9.90   2.60     1.00
+2026-09-13   1000    218     29     21     19  10.38   1.38     1.11
+2026-09-13   2000    445     39     26     26  17.12   1.50     1.00
+
+reference outputs in oracle_ref/, total 15 s
