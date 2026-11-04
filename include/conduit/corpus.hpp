@@ -117,4 +117,11 @@ struct Manifest {
 // Loads the manifest; with verify, refuses one built from a different tx.bin.
 Manifest load_manifest(const std::string& path, const Corpus& corpus, bool verify = true);
 
+// Default corpus directory: $CONDUIT_CORPUS, else "corpus".
+std::string default_corpus_dir();
+// Manifest to use: the explicit path if given; else $CONDUIT_MANIFEST; else
+// <corpus_dir>/superblocks.json when it exists (ingest.py writes one next to
+// every corpus it builds); else the repository's superblocks.json.
+std::string resolve_manifest(const std::string& explicit_path, const std::string& corpus_dir);
+
 }  // namespace conduit

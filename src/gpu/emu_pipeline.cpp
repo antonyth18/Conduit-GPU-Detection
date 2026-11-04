@@ -39,13 +39,15 @@ void inclusive_scan_into(const std::vector<T>& in, std::vector<T>& out) {
 Result run_emu(const Tx* tx, size_t n_in, Policy policy, const Selectors& sels,
                const GpuOptions& opts, GpuTimings* timings) {
     if (n_in > 0x7FFFFFFFull) throw std::runtime_error("slice too large for the GPU pipeline");
+    const auto h0 = clock_t_::now();
     check_ids(tx, n_in);
     const uint32_t n = uint32_t(n_in);
     const gk::DevSelectors ds{sels.plain, sels.transfer, sels.approve, sels.transfer_from};
     const int pol = int(policy);
     GpuTimings tm;
     Result res;
-    const auto w0 = clock_t_::now();
+    const auto w0 = h0;
+    tm.host_prep = secs(h0, clock_t_::now());
 
     // ---- stage 1: extraction -------------------------------------------------
     auto t0 = clock_t_::now();
@@ -56,6 +58,10 @@ Result run_emu(const Tx* tx, size_t n_in, Policy policy, const Selectors& sels,
     std::vector<uint64_t> hi(R), lo(R);
     for (uint32_t i = 0; i < n; ++i) gk::extract_write(i, tx, pol, ds, off.data(), hi.data(), lo.data());
     tm.launches += 3;
+    if (opts.capture) {
+        opts.capture->extracted.resize(R);
+        for (uint32_t i = 0; i < R; ++i) opts.capture->extracted[i] = {hi[i], lo[i]};
+    }
     auto t1 = clock_t_::now();
 
     // ---- stage 2a: stable sort by key (CUB SortPairs is stable) ---------------
@@ -70,6 +76,10 @@ Result run_emu(const Tx* tx, size_t n_in, Policy policy, const Selectors& sels,
         lo.swap(l2);
     }
     tm.launches += 1;
+    if (opts.capture) {
+        opts.capture->sorted.resize(R);
+        for (uint32_t i = 0; i < R; ++i) opts.capture->sorted[i] = {hi[i], lo[i]};
+    }
     auto t2 = clock_t_::now();
 
     // ---- stage 2b: detection ----------------------------------------------------
@@ -107,9 +117,17 @@ Result run_emu(const Tx* tx, size_t n_in, Policy policy, const Selectors& sels,
         exclusive_scan_into(ecount, eoff);
         E = eoff[R];
         edges.resize(E);
-        for (uint64_t e = 0; e < E; ++e)
-            gk::edge_emit(e, R, eoff.data(), lo.data(), rscan.data(), rstart.data(), edges.data());
+        if (opts.detect == DetectMode::Record) {
+            for (uint32_t c = 0; c < R; ++c)
+                gk::record_emit(c, eoff.data(), lo.data(), gflag.data(), rscan.data(),
+                                rstart.data(), edges.data());
+        } else {
+            for (uint64_t e = 0; e < E; ++e)
+                gk::edge_emit(e, R, eoff.data(), lo.data(), rscan.data(), rstart.data(),
+                              edges.data());
+        }
     }
+    if (opts.capture) opts.capture->edges = edges;
     tm.launches += 3;
     tm.host_syncs += 2;
     auto t3 = clock_t_::now();

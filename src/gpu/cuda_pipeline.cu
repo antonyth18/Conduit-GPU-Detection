@@ -149,6 +149,14 @@ __global__ void k_record_count(uint32_t R, const uint64_t* lo, const uint32_t* g
     GRID_STRIDE(i, R) gk::record_count(uint32_t(i), lo, gf, rs, rstart, ecount, rc);
 }
 
+__global__ void k_record_emit(uint32_t R, const uint64_t* eoff, const uint64_t* lo,
+                              const uint32_t* gf, const uint32_t* rs, const uint32_t* rstart,
+                              uint64_t* edges) {
+    GRID_STRIDE(c, R) gk::record_emit(uint32_t(c), eoff, lo, gf, rs, rstart, edges);
+}
+
+__global__ void k_empty() {}
+
 __global__ void k_edge_emit(uint64_t E, uint32_t R, const uint64_t* eoff, const uint64_t* lo,
                             const uint32_t* rs, const uint32_t* rstart, uint64_t* edges) {
     GRID_STRIDE(e, E) gk::edge_emit(e, R, eoff, lo, rs, rstart, edges);
@@ -426,6 +434,7 @@ namespace gpu_detail {
 Result run_cuda(const Tx* tx, size_t n_in, Policy policy, const Selectors& sels,
                 const GpuOptions& opts, GpuTimings* timings) {
     using clk = std::chrono::steady_clock;
+    const auto w0 = clk::now();
     if (n_in > 0x7FFFFFFFull) throw std::runtime_error("slice too large for the GPU pipeline");
     check_ids(tx, n_in);
     Ctx& c = ctx();
@@ -443,7 +452,6 @@ Result run_cuda(const Tx* tx, size_t n_in, Policy policy, const Selectors& sels,
         if (timings) *timings = tm;
         return res;
     }
-    const auto w0 = clk::now();
 
     // ---- H2D ----------------------------------------------------------------
     c.tx.ensure(n);
@@ -455,6 +463,7 @@ Result run_cuda(const Tx* tx, size_t n_in, Policy policy, const Selectors& sels,
         std::memcpy(c.h_tx.p, tx, size_t(n) * sizeof(Tx));
         src = c.h_tx.p;
     }
+    tm.host_prep = std::chrono::duration<double>(clk::now() - w0).count();
     CDX_CUDA(cudaEventRecord(c.ev[0], s));
     CDX_CUDA(cudaMemcpyAsync(c.tx.p, src, size_t(n) * sizeof(Tx), cudaMemcpyHostToDevice, s));
     CDX_CUDA(cudaEventRecord(c.ev[1], s));
@@ -474,6 +483,17 @@ Result run_cuda(const Tx* tx, size_t n_in, Policy policy, const Selectors& sels,
     CDX_KCHECK();
     ++c.launches;
     CDX_CUDA(cudaEventRecord(c.ev[2], s));
+    auto capture_records = [&](std::vector<Record>& out, const uint64_t* dh, const uint64_t* dl) {
+        std::vector<uint64_t> h(R), l(R);
+        if (R) {
+            CDX_CUDA(cudaMemcpyAsync(h.data(), dh, size_t(R) * 8, cudaMemcpyDeviceToHost, s));
+            CDX_CUDA(cudaMemcpyAsync(l.data(), dl, size_t(R) * 8, cudaMemcpyDeviceToHost, s));
+            CDX_CUDA(cudaStreamSynchronize(s));
+        }
+        out.resize(R);
+        for (uint32_t i = 0; i < R; ++i) out[i] = {h[i], l[i]};
+    };
+    if (opts.capture) capture_records(opts.capture->extracted, c.hi.p, c.lo.p);
 
     // ---- stage 2a: stable radix sort by key ---------------------------------------
     if (R) {
@@ -488,6 +508,7 @@ Result run_cuda(const Tx* tx, size_t n_in, Policy policy, const Selectors& sels,
     }
     uint64_t* shi = c.hi2.p;
     uint64_t* slo = c.lo2.p;
+    if (opts.capture) capture_records(opts.capture->sorted, shi, slo);
     CDX_CUDA(cudaEventRecord(c.ev[3], s));
 
     // ---- stage 2b: detection --------------------------------------------------------
@@ -548,13 +569,25 @@ Result run_cuda(const Tx* tx, size_t n_in, Policy policy, const Selectors& sels,
             ex_sum(c, c.ecount.p, c.eoff.p, uint64_t(R) + 1);
             E = c.read(c.eoff.p + R);
             c.edges.ensure(E);
-            if (E) {
+            if (E && opts.detect == DetectMode::Record) {
+                k_record_emit<<<grid_for(R), BLOCK, 0, s>>>(R, c.eoff.p, slo, c.gflag.p,
+                                                             c.rscan.p, c.rstart.p, c.edges.p);
+                CDX_KCHECK();
+                ++c.launches;
+            } else if (E) {
                 k_edge_emit<<<grid_for(E), BLOCK, 0, s>>>(E, R, c.eoff.p, slo, c.rscan.p,
                                                            c.rstart.p, c.edges.p);
                 CDX_KCHECK();
                 ++c.launches;
             }
         }
+    }
+    if (opts.capture) {
+        opts.capture->edges.resize(E);
+        if (E)
+            CDX_CUDA(cudaMemcpyAsync(opts.capture->edges.data(), c.edges.p, E * 8,
+                                     cudaMemcpyDeviceToHost, s));
+        CDX_CUDA(cudaStreamSynchronize(s));
     }
     CDX_CUDA(cudaEventRecord(c.ev[4], s));
 
@@ -731,11 +764,13 @@ Result run_cuda(const Tx* tx, size_t n_in, Policy policy, const Selectors& sels,
                                  cudaMemcpyDeviceToHost, s));
     CDX_CUDA(cudaEventRecord(c.ev[7], s));
     CDX_CUDA(cudaEventSynchronize(c.ev[7]));
+    const auto p0 = clk::now();
     if (opts.pinned) {
         std::memcpy(res.graph.row_offsets.data(), c.h_row.p, (size_t(n) + 1) * 8);
         if (M) std::memcpy(res.graph.cols.data(), c.h_cols.p, M * 4);
         if (gpu_level) std::memcpy(lv.data(), c.h_lv.p, size_t(n) * 4);
     }
+    tm.host_post = std::chrono::duration<double>(clk::now() - p0).count();
     const uint32_t max_group = R ? c.read(c.scalars32.p) : 0;
     const uint64_t read_comm = c.read(c.scalars64.p);
 
@@ -776,4 +811,59 @@ Result run_cuda(const Tx* tx, size_t n_in, Policy policy, const Selectors& sels,
 }
 
 }  // namespace gpu_detail
+
+PcieProbe pcie_probe(const std::vector<size_t>& sizes, int reps) {
+    Ctx& c = ctx();
+    const cudaStream_t s = c.stream;
+    PcieProbe out;
+    size_t big = 4;
+    for (size_t b : sizes) big = std::max(big, b);
+    DBuf<uint8_t> dev;
+    dev.ensure(big);
+    HBuf<uint8_t> pin;
+    pin.ensure(big);
+    std::vector<uint8_t> page(big, 1);
+    std::memset(pin.p, 1, big);
+    auto timed = [&](void* dst, const void* src, size_t b, cudaMemcpyKind k) {
+        std::vector<double> v;
+        for (int r = 0; r < reps + 1; ++r) {
+            CDX_CUDA(cudaEventRecord(c.ev[8], s));
+            CDX_CUDA(cudaMemcpyAsync(dst, src, b, k, s));
+            CDX_CUDA(cudaEventRecord(c.ev[9], s));
+            CDX_CUDA(cudaEventSynchronize(c.ev[9]));
+            if (r) v.push_back(ms_between(c.ev[8], c.ev[9]));   // first = warm-up
+        }
+        std::sort(v.begin(), v.end());
+        return v[v.size() / 2];
+    };
+    for (size_t b : sizes) {
+        PcieSample p;
+        p.bytes = b;
+        p.h2d_pinned = timed(dev.p, pin.p, b, cudaMemcpyHostToDevice);
+        p.d2h_pinned = timed(pin.p, dev.p, b, cudaMemcpyDeviceToHost);
+        p.h2d_pageable = timed(dev.p, page.data(), b, cudaMemcpyHostToDevice);
+        p.d2h_pageable = timed(page.data(), dev.p, b, cudaMemcpyDeviceToHost);
+        out.samples.push_back(p);
+    }
+    using clk = std::chrono::steady_clock;
+    std::vector<double> lv, sv;
+    for (int r = 0; r < reps + 1; ++r) {
+        auto a = clk::now();
+        k_empty<<<1, 1, 0, s>>>();
+        CDX_CUDA(cudaStreamSynchronize(s));
+        auto b = clk::now();
+        (void)c.read(reinterpret_cast<const uint32_t*>(dev.p));
+        auto d = clk::now();
+        if (r) {
+            lv.push_back(std::chrono::duration<double>(b - a).count());
+            sv.push_back(std::chrono::duration<double>(d - b).count());
+        }
+    }
+    std::sort(lv.begin(), lv.end());
+    std::sort(sv.begin(), sv.end());
+    out.launch = lv[lv.size() / 2];
+    out.sync = sv[sv.size() / 2];
+    return out;
+}
+
 }  // namespace conduit

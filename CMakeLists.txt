@@ -87,7 +87,7 @@ if(CONDUIT_WITH_CUDA)
                  "${CMAKE_CUDA_ARCHITECTURES}")
 endif()
 
-foreach(tool conduit_run dump_access conduit_bench membw conduit_gpu)
+foreach(tool conduit_run dump_access conduit_bench membw conduit_gpu conduit_trace)
   add_executable(${tool} tools/${tool}.cpp)
   target_link_libraries(${tool} PRIVATE conduit)
   target_compile_options(${tool} PRIVATE -Wall -Wextra -pedantic)

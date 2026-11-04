@@ -9,7 +9,9 @@ from pathlib import Path
 
 import numpy as np
 
-OUT = Path(__file__).parent / "corpus"
+import os  # noqa: E402
+
+OUT = Path(os.environ.get("CONDUIT_CORPUS") or Path(__file__).parent / "corpus")
 ABSENT = 0xFFFFFFFF
 
 DTYPE = np.dtype([

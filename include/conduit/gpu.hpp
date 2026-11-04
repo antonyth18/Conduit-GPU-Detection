@@ -11,11 +11,15 @@
 //   1 extract   one thread per tx: count accesses, scan, write records
 //   2 sort      stable radix sort of records by key (records are generated
 //               in tx order, so a stable key sort gives the full 128-bit order)
-//   2 detect    group heads by flag + scan, then either
+//   2 detect    group heads by flag + scan, then one of three thread mappings
+//               (Phase 9 measures all three on the same input):
 //                 group    one thread per key group walks walk_group (naive;
 //                          a hot key serialises onto one thread)  [Phase 9 "before"]
+//                 record   one thread per record writes its in-edges (the
+//                          previous run); per-record work = that run's length
 //                 balanced one thread per OUTPUT EDGE, located by binary search
-//                          over per-record edge offsets             [Phase 9 "after"]
+//                          over per-record edge offsets (load-balanced search,
+//                          Merrill & Garland 2016)                  [Phase 9 "after"]
 //   3 csr       radix sort of u*n+v, unique, row offsets by binary search
 //   4 level     sweep   CSR copied back, sequential sweep on the CPU (default,
 //                       as the handover asks)
@@ -39,14 +43,24 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "conduit/pipeline.hpp"
 
 namespace conduit {
 
 enum class GpuBackend { Cuda, Emu };
-enum class DetectMode { Group, Balanced };
+enum class DetectMode { Group, Record, Balanced };
 enum class GpuLevel { Sweep, Kahn, JpIndex, JpRandom };
+
+// Intermediate outputs, for verifying the port stage by stage (Phase 8):
+// records as extracted (block order), records after the sort, and the raw
+// edge list as detection emitted it (before stage 3 sorts and deduplicates).
+struct GpuCapture {
+    std::vector<Record> extracted;
+    std::vector<Record> sorted;
+    std::vector<uint64_t> edges;
+};
 
 struct GpuOptions {
     GpuBackend backend = GpuBackend::Cuda;
@@ -57,6 +71,7 @@ struct GpuOptions {
     int tail_block = 1024;            // threads in the persistent block
     uint32_t chunk = 32;              // multi-block rounds enqueued per host check
     bool pinned = true;               // stage H2D/D2H through pinned buffers
+    GpuCapture* capture = nullptr;    // if set, copy intermediates back (untimed use only)
 };
 
 // Seconds, like Timings. For cuda the stage times are cudaEvent intervals on
@@ -65,6 +80,12 @@ struct GpuOptions {
 struct GpuTimings {
     double h2d = 0, extract = 0, sort = 0, detect = 0, csr = 0, d2h = 0, level = 0;
     double wall = 0;
+    // host-side work inside wall but outside the device timeline:
+    //   host_prep  id check + copy of the input into the pinned staging buffer
+    //   host_post  copy of the results out of the pinned buffers into the
+    //              returned vectors (and their allocation)
+    // wall - (h2d + kernels + d2h) - host_prep - host_post = launch / sync gaps
+    double host_prep = 0, host_post = 0;
     double kernels() const { return extract + sort + detect + csr + level; }
     double with_transfer() const { return h2d + kernels() + d2h; }
     uint64_t launches = 0;           // kernel launches (CUB calls count as 1)
@@ -86,6 +107,19 @@ const char* gpu_level_name(GpuLevel l);
 bool have_cuda();
 // One line: device name, SMs, memory, compute capability, driver/runtime.
 std::string cuda_device_info();
+
+// PCIe / launch microbenchmark (Phase 8 transfer-cost arithmetic). Seconds per
+// transfer, median of reps, cudaEvent-timed; launch = empty kernel launch +
+// synchronise; sync = a 4-byte device->host read (one host round trip).
+struct PcieSample {
+    size_t bytes = 0;
+    double h2d_pinned = 0, d2h_pinned = 0, h2d_pageable = 0, d2h_pageable = 0;
+};
+struct PcieProbe {
+    std::vector<PcieSample> samples;
+    double launch = 0, sync = 0;
+};
+PcieProbe pcie_probe(const std::vector<size_t>& sizes, int reps);
 
 // Result::levels holds levels for sweep / kahn / jp-index and batch ids for
 // jp-random; Result::level_stats.rounds = number of batches for kahn / jp.

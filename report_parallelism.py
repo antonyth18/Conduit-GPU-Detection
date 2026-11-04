@@ -71,9 +71,11 @@ class Doc:
 
 def main():
     rows = load()
-    manifest = json.load(open(ROOT / "superblocks.json"))
+    from access_sets import CORPUS
+    from superblocks import MANIFEST
+    manifest = json.load(open(MANIFEST))
     block_first = {e["id"]: e["block_first"] for e in manifest["superblocks"]}
-    addrs = open(ROOT / "corpus" / "addresses.txt").read().split("\n")[:-1]
+    addrs = open(CORPUS / "addresses.txt").read().split("\n")[:-1]
     valid = list(csv.DictReader(open(RES / "phase6_validation.csv")))
     dates = list(dict.fromkeys(r["date"] for r in rows))
     targets = sorted({r["target"] for r in rows})

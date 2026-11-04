@@ -36,6 +36,14 @@
 //       preprocessing times, execution speedups, gas-weighted models and the
 //       end-to-end comparison (serial vs GPU preprocessing + parallel execution).
 //
+//   conduit_gpu stages [cases]          Phase 8: each GPU stage (extract, sort,
+//       detect, CSR, levels) against the CPU stage, for every detect mapping
+//   conduit_gpu pcie [--csv FILE]       Phase 8: PCIe bandwidth (pinned/pageable,
+//       both directions), launch and sync latency, for the transfer arithmetic
+//   conduit_gpu skew [cases] [--csv FILE]   Phase 9: hot-key statistics, per-thread
+//       work imbalance and detect time of the group (before), record and
+//       balanced (after) mappings; recovery = group time / mapping time
+//
 // cases: --full (whole-day super-blocks) | --median (default: each day's median super-block at every target)
 //        | --all [--date D] [--target T] | --id ID ...
 // common: [--corpus DIR] [--manifest PATH] [--policy P1|P2|P3|all]
@@ -111,7 +119,7 @@ struct Case {
 };
 
 struct Args {
-    std::string corpus = "corpus", manifest = "superblocks.json", csv;
+    std::string corpus = default_corpus_dir(), manifest, csv;
     std::vector<std::string> ids;
     bool all = false;
     std::string date;
@@ -216,9 +224,10 @@ int run_verify(const Corpus& corpus, const Manifest& m, const Selectors& sels, c
             }
 
             // deterministic GPU configurations must equal seq-std
-            for (DetectMode d : {DetectMode::Group, DetectMode::Balanced})
+            for (DetectMode d : {DetectMode::Group, DetectMode::Record, DetectMode::Balanced})
                 for (GpuLevel l : {GpuLevel::Sweep, GpuLevel::Kahn, GpuLevel::JpIndex})
                     for (uint32_t T : {0u, 8192u}) {
+                        if (d != DetectMode::Balanced && l != GpuLevel::Sweep) continue;
                         if (jp_level(l) && c.n > a.jp_max) continue;
                         if (T == 0 && c.n > a.jp_max) continue;
                         GpuOptions o;
@@ -326,12 +335,13 @@ int run_bench(const Corpus& corpus, const Manifest& m, const Selectors& sels, co
             }
         std::vector<std::pair<DetectMode, GpuLevel>> gv;
         if (a.configs == "full") {
-            for (DetectMode d : {DetectMode::Group, DetectMode::Balanced})
+            for (DetectMode d : {DetectMode::Group, DetectMode::Record, DetectMode::Balanced})
                 for (GpuLevel l : {GpuLevel::Sweep, GpuLevel::Kahn, GpuLevel::JpIndex,
                                    GpuLevel::JpRandom})
                     gv.push_back({d, l});
         } else {
             gv = {{DetectMode::Group, GpuLevel::Sweep},
+                  {DetectMode::Record, GpuLevel::Sweep},
                   {DetectMode::Balanced, GpuLevel::Sweep},
                   {DetectMode::Balanced, GpuLevel::Kahn},
                   {DetectMode::Balanced, GpuLevel::JpIndex},
@@ -354,7 +364,7 @@ int run_bench(const Corpus& corpus, const Manifest& m, const Selectors& sels, co
     std::fputs("id,date,target,n,policy,impl,threads,detect,level,records,edges,batches,"
                "max_group,launches,host_syncs,rounds,tail_rounds,device_mb,t_h2d_ms,"
                "t_extract_ms,t_sort_ms,t_detect_ms,t_csr_ms,t_d2h_ms,t_level_ms,"
-               "t_stages13_ms,t_e2e_ms,t_wall_ms\n",
+               "t_stages13_ms,t_e2e_ms,t_wall_ms,t_host_prep_ms,t_host_post_ms,runs,warmup\n",
                csv);
 
     for (const Case& cs : cases) {
@@ -383,7 +393,7 @@ int run_bench(const Corpus& corpus, const Manifest& m, const Selectors& sels, co
                     throw std::runtime_error(std::string("CPU output differs: ") +
                                              impl_name(cf.cpu.impl));
                 }
-                std::vector<double> th, te, ts, td, tc, tdd, tl, t13, tee, tw;
+                std::vector<double> th, te, ts, td, tc, tdd, tl, t13, tee, tw, thp, thq;
                 Result last;
                 GpuTimings lg;
                 for (int r = 0; r < warmup + runs; ++r) {
@@ -402,6 +412,8 @@ int run_bench(const Corpus& corpus, const Manifest& m, const Selectors& sels, co
                             t13.push_back((g.extract + g.sort + g.detect + g.csr) * 1e3);
                             tee.push_back(g.with_transfer() * 1e3);
                             tw.push_back(g.wall * 1e3);
+                            thp.push_back(g.host_prep * 1e3);
+                            thq.push_back(g.host_post * 1e3);
                         }
                         lg = g;
                     } else {
@@ -422,6 +434,8 @@ int run_bench(const Corpus& corpus, const Manifest& m, const Selectors& sels, co
                             t13.push_back((t.extract + t.sort + t.detect + t.csr) * 1e3);
                             tee.push_back(t.total() * 1e3);
                             tw.push_back(wall * 1e3);
+                            thp.push_back(0);
+                            thq.push_back(0);
                         }
                     }
                     if (r == warmup + runs - 1) last = std::move(res);
@@ -429,7 +443,7 @@ int run_bench(const Corpus& corpus, const Manifest& m, const Selectors& sels, co
                 std::fprintf(
                     csv,
                     "%s,%s,%u,%zu,%s,%s,%d,%s,%s,%zu,%llu,%u,%u,%llu,%llu,%llu,%llu,%.2f,%.4f,"
-                    "%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f\n",
+                    "%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%d,%d\n",
                     cs.sb->id.c_str(), cs.sb->date.c_str(), cs.sb->target, cs.n, policy_name(p),
                     cf.impl_label().c_str(),
                     cf.gpu ? 0 : (cf.cpu.impl == Impl::Omp ? cf.cpu.threads : 1),
@@ -442,7 +456,7 @@ int run_bench(const Corpus& corpus, const Manifest& m, const Selectors& sels, co
                     (unsigned long long)(cf.gpu ? lg.tail_rounds : 0),
                     cf.gpu ? double(lg.device_bytes) / (1 << 20) : 0.0, median(th), median(te),
                     median(ts), median(td), median(tc), median(tdd), median(tl), median(t13),
-                    median(tee), median(tw));
+                    median(tee), median(tw), median(thp), median(thq), runs, warmup);
                 std::fflush(csv);
             }
             std::cout << "  " << label(cs) << " " << policy_name(p) << ": " << grid.size()
@@ -526,6 +540,222 @@ int run_schedule(const Corpus& corpus, const Manifest& m, const Selectors& sels,
     return 0;
 }
 
+
+// ---- key labels (skew / trace) ----------------------------------------------------
+
+struct AddrBook {
+    std::vector<std::string> addr;
+    explicit AddrBook(const std::string& corpus_dir) {
+        std::FILE* f = std::fopen((corpus_dir + "/addresses.txt").c_str(), "rb");
+        if (!f) return;
+        char buf[256];
+        while (std::fgets(buf, sizeof buf, f)) {
+            std::string s(buf);
+            while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) s.pop_back();
+            addr.push_back(s);
+        }
+        std::fclose(f);
+    }
+    std::string name(uint64_t id) const {
+        if (id < addr.size() && addr[id].size() >= 8)
+            return "0x" + addr[id].substr(0, 4) + ".." + addr[id].substr(addr[id].size() - 4);
+        return "#" + std::to_string(id);
+    }
+};
+
+std::string key_label(uint64_t key, const AddrBook& ab) {
+    const uint64_t M = (1ull << 21) - 1;
+    if (key >> 63)
+        return "ALLOWANCE(" + ab.name((key >> 42) & M) + "," + ab.name((key >> 21) & M) + "," +
+               ab.name(key & M) + ")";
+    const uint64_t kind = (key >> 60) & 7, x = (key >> 21) & M, y = key & M;
+    switch (kind) {
+        case 0: return "ACCOUNT(" + ab.name(x) + ")";
+        case 1: return "NONCE(" + ab.name(x) + ")";
+        case 2: return "ETH_BAL(" + ab.name(x) + ")";
+        case 3: return "TOKEN_BAL(" + ab.name(x) + "," + ab.name(y) + ")";
+    }
+    return "KEY";
+}
+
+// ---- stages (Phase 8: the port verified stage by stage) -----------------------------
+
+int run_stages(const Corpus& corpus, const Manifest& m, const Selectors& sels, const Args& a) {
+    const std::vector<Case> cases = select_cases(m, a, false);
+    uint64_t checks = 0, failures = 0;
+    std::printf("%-28s %4s %-9s %8s  %-8s %-8s %-9s %-8s %-8s\n", "super-block", "pol", "detect",
+                "n", "1-extract", "2a-sort", "2b-detect", "3-csr", "4-levels");
+    for (const Case& c : cases) {
+        const Tx* tx = corpus.tx() + c.sb->tx_start;
+        for (Policy p : a.policies) {
+            std::vector<Record> rec0 = extract(tx, c.n, p, sels);
+            std::vector<Record> sorted = rec0;
+            sort_records(sorted);
+            EdgeStats st;
+            std::vector<uint64_t> e = detect(sorted, &st);
+            std::vector<uint64_t> e_sorted = e;
+            std::sort(e_sorted.begin(), e_sorted.end());
+            std::vector<uint64_t> tmp = e;
+            const Graph g = build_csr(uint32_t(c.n), tmp);
+            const std::vector<uint32_t> lv = level(g);
+            for (DetectMode d : {DetectMode::Group, DetectMode::Record, DetectMode::Balanced}) {
+                GpuCapture cap;
+                GpuOptions o;
+                o.backend = a.backend;
+                o.detect = d;
+                o.capture = &cap;
+                const Result r = run_pipeline_gpu(tx, c.n, p, sels, o);
+                std::vector<uint64_t> ce = cap.edges;
+                std::sort(ce.begin(), ce.end());
+                const bool s1 = cap.extracted == rec0, s2 = cap.sorted == sorted,
+                           s3 = ce == e_sorted && r.stats.emitted == st.emitted,
+                           s4 = r.graph.cols == g.cols && r.graph.row_offsets == g.row_offsets,
+                           s5 = r.levels == lv;
+                checks += 5;
+                failures += !s1 + !s2 + !s3 + !s4 + !s5;
+                auto f = [](bool b) { return b ? "PASS" : "FAIL"; };
+                std::printf("%-28s %4s %-9s %8zu  %-8s %-8s %-9s %-8s %-8s\n", label(c).c_str(),
+                            policy_name(p), detect_name(d), c.n, f(s1), f(s2), f(s3), f(s4), f(s5));
+                std::fflush(stdout);
+            }
+        }
+    }
+    std::printf("\n%llu stage checks, %llu failures\n%s\n", (unsigned long long)checks,
+                (unsigned long long)failures,
+                failures ? "STAGE OUTPUT DIFFERS" : "ALL STAGES IDENTICAL TO THE CPU REFERENCE");
+    return failures ? 1 : 0;
+}
+
+// ---- pcie (Phase 8: transfer-cost arithmetic) ---------------------------------------
+
+int run_pcie(const Args& a) {
+    if (a.backend != GpuBackend::Cuda || !have_cuda())
+        throw std::runtime_error("pcie needs a CUDA device");
+    std::vector<size_t> sizes;
+    for (size_t b = 4096; b <= (size_t(256) << 20); b *= 4) sizes.push_back(b);
+    const PcieProbe pr = pcie_probe(sizes, std::max(5, a.runs));
+    std::printf("%12s %12s %12s %12s %12s   (GB/s, median of %d)\n", "bytes", "H2D pinned",
+                "D2H pinned", "H2D pageable", "D2H pageable", std::max(5, a.runs));
+    std::FILE* csv = a.csv.empty() ? nullptr : std::fopen(a.csv.c_str(), "wb");
+    if (csv)
+        std::fputs("bytes,h2d_pinned_s,d2h_pinned_s,h2d_pageable_s,d2h_pageable_s,launch_s,sync_s\n",
+                   csv);
+    for (const PcieSample& s : pr.samples) {
+        auto gbs = [&](double t) { return t > 0 ? double(s.bytes) / t / 1e9 : 0.0; };
+        std::printf("%12zu %12.2f %12.2f %12.2f %12.2f\n", s.bytes, gbs(s.h2d_pinned),
+                    gbs(s.d2h_pinned), gbs(s.h2d_pageable), gbs(s.d2h_pageable));
+        if (csv)
+            std::fprintf(csv, "%zu,%.9f,%.9f,%.9f,%.9f,%.9f,%.9f\n", s.bytes, s.h2d_pinned,
+                         s.d2h_pinned, s.h2d_pageable, s.d2h_pageable, pr.launch, pr.sync);
+    }
+    std::printf("empty kernel launch + sync: %.1f us; one device->host read (sync round trip): "
+                "%.1f us\n",
+                pr.launch * 1e6, pr.sync * 1e6);
+    if (csv) {
+        std::fclose(csv);
+        std::printf("wrote %s\n", a.csv.c_str());
+    }
+    return 0;
+}
+
+// ---- skew (Phase 9: before-number, rebalance, recovery) -------------------------------
+
+int run_skew(const Corpus& corpus, const Manifest& m, const Selectors& sels, const Args& a) {
+    const std::vector<Case> cases = select_cases(m, a, false);
+    const AddrBook ab(a.corpus);
+    std::FILE* csv = a.csv.empty() ? nullptr : std::fopen(a.csv.c_str(), "wb");
+    if (csv)
+        std::fputs("id,date,n,policy,records,groups,max_group,max_group_pct,p99_group,"
+                   "groups_ge_1024,hot_key,edges,imb_group,imb_record,imb_edge,detect_group_ms,"
+                   "detect_record_ms,detect_balanced_ms,recovery_record,recovery_balanced,backend,"
+                   "runs\n",
+                   csv);
+    std::printf("%-26s %4s %9s %8s %7s %-30s %7s %7s %9s %9s %9s %7s %7s\n", "super-block", "pol",
+                "records", "maxgrp", "%rec", "hottest key", "imb-grp", "imb-rec", "grp ms",
+                "rec ms", "edge ms", "rec x", "edge x");
+    for (const Case& c : cases) {
+        const Tx* tx = corpus.tx() + c.sb->tx_start;
+        for (Policy p : a.policies) {
+            std::vector<Record> r = extract(tx, c.n, p, sels);
+            sort_records(r);
+            // groups, runs, per-thread work of each mapping
+            std::vector<uint32_t> gsize;
+            std::vector<double> wg, wr;   // per-thread work: group walk / record in-edges
+            uint64_t E = 0, hot_key = 0;
+            uint32_t hot = 0;
+            for (size_t i = 0; i < r.size();) {
+                size_t j = i;
+                while (j < r.size() && rec_key(r[j]) == rec_key(r[i])) ++j;
+                const uint32_t sz = uint32_t(j - i);
+                gsize.push_back(sz);
+                if (sz > hot) { hot = sz; hot_key = rec_key(r[i]); }
+                uint64_t ge = 0, prev = 0;
+                for (size_t q = i; q < j;) {
+                    const uint8_t mode = rec_mode(r[q]);
+                    size_t e = q + 1;
+                    if (mode != WRITE)
+                        while (e < j && rec_mode(r[e]) == mode) ++e;
+                    for (size_t k = q; k < e; ++k) wr.push_back(1.0 + double(prev));
+                    ge += prev * (e - q);
+                    prev = e - q;
+                    q = e;
+                }
+                wg.push_back(double(sz) + double(ge));
+                E += ge;
+                i = j;
+            }
+            auto imb = [](const std::vector<double>& w) {
+                if (w.empty()) return 0.0;
+                double mx = 0, s = 0;
+                for (double x : w) { mx = std::max(mx, x); s += x; }
+                return mx / (s / double(w.size()));
+            };
+            std::vector<uint32_t> gs = gsize;
+            std::sort(gs.begin(), gs.end());
+            const uint32_t p99 = gs.empty() ? 0 : gs[size_t(0.99 * double(gs.size() - 1))];
+            size_t big = 0;
+            for (uint32_t z : gs) big += z >= 1024;
+            // GPU detect time of each mapping, before-number first
+            double td[3] = {0, 0, 0};
+            int k = 0;
+            for (DetectMode d : {DetectMode::Group, DetectMode::Record, DetectMode::Balanced}) {
+                GpuOptions o;
+                o.backend = a.backend;
+                o.detect = d;
+                std::vector<double> v;
+                for (int rr = 0; rr < a.warmup + a.runs; ++rr) {
+                    GpuTimings g;
+                    run_pipeline_gpu(tx, c.n, p, sels, o, &g);
+                    if (rr >= a.warmup) v.push_back(g.detect * 1e3);
+                }
+                td[k++] = median(v);
+            }
+            const std::string hk = key_label(hot_key, ab);
+            std::printf("%-26s %4s %9zu %8u %6.1f%% %-30s %7.0f %7.0f %9.3f %9.3f %9.3f %6.1fx "
+                        "%6.1fx\n",
+                        label(c).c_str(), policy_name(p), r.size(), hot,
+                        100.0 * hot / std::max<size_t>(1, r.size()), hk.substr(0, 30).c_str(),
+                        imb(wg), imb(wr), td[0], td[1], td[2], td[0] / td[1], td[0] / td[2]);
+            std::fflush(stdout);
+            if (csv)
+                std::fprintf(csv,
+                             "%s,%s,%zu,%s,%zu,%zu,%u,%.3f,%u,%zu,%s,%llu,%.2f,%.2f,1.00,%.4f,"
+                             "%.4f,%.4f,%.3f,%.3f,%s,%d\n",
+                             c.sb->id.c_str(), c.sb->date.c_str(), c.n, policy_name(p), r.size(),
+                             gsize.size(), hot, 100.0 * hot / std::max<size_t>(1, r.size()), p99,
+                             big, hk.c_str(), (unsigned long long)E, imb(wg), imb(wr), td[0],
+                             td[1], td[2], td[0] / td[1], td[0] / td[2],
+                             gpu_backend_name(a.backend), a.runs);
+        }
+    }
+    if (csv) {
+        std::fclose(csv);
+        std::printf("wrote %s\n", a.csv.c_str());
+    }
+    std::printf("imb = max / mean work per GPU thread (1.0 = perfectly even); x = detect-stage "
+                "speedup over the group mapping (the before-number)\n");
+    return 0;
+}
 
 // ---- execute ------------------------------------------------------------------------
 
@@ -714,7 +944,7 @@ int run_execute(const Corpus& corpus, const Manifest& m, const Selectors& sels, 
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        std::cerr << "usage: conduit_gpu info|verify|bench|schedule|execute [options]\n";
+        std::cerr << "usage: conduit_gpu info|pcie|verify|stages|bench|skew|schedule|execute|trace [options]\n";
         return 2;
     }
     const std::string mode = argv[1];
@@ -769,13 +999,16 @@ int main(int argc, char** argv) {
                   << gpu_backend_name(a.backend) << "; OpenMP " << (have_openmp() ? "on" : "off")
                   << "\n";
         if (mode == "info") return 0;
+        if (mode == "pcie") return run_pcie(a);
         Corpus corpus(a.corpus);
-        Manifest m = load_manifest(a.manifest, corpus);
+        Manifest m = load_manifest(resolve_manifest(a.manifest, a.corpus), corpus);
         Selectors sels(corpus.selectors);
         if (mode == "verify") return run_verify(corpus, m, sels, a);
         if (mode == "bench") return run_bench(corpus, m, sels, a);
         if (mode == "schedule") return run_schedule(corpus, m, sels, a);
         if (mode == "execute") return run_execute(corpus, m, sels, a);
+        if (mode == "stages") return run_stages(corpus, m, sels, a);
+        if (mode == "skew") return run_skew(corpus, m, sels, a);
         std::cerr << "unknown mode " << mode << "\n";
         return 2;
     } catch (const std::exception& e) {

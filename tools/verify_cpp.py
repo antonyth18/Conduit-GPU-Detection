@@ -29,7 +29,8 @@ sys.path.insert(0, str(ROOT))
 from access_sets import POLICIES, Selectors, infer, load_corpus  # noqa: E402
 from compare import compare, describe  # noqa: E402
 from oracle import access_lists, validate, validate_fast  # noqa: E402
-from superblocks import SuperBlocks  # noqa: E402
+from superblocks import MANIFEST, SuperBlocks  # noqa: E402
+from access_sets import CORPUS  # noqa: E402
 
 RUN = ROOT / "build" / "conduit_run"
 REF = ROOT / "oracle_ref"
@@ -59,8 +60,8 @@ EXTRA = sys.argv[1:]
 
 
 def run_cpp(args, dump_dir):
-    subprocess.run([str(RUN), *EXTRA, "--corpus", str(ROOT / "corpus"),
-                    "--manifest", str(ROOT / "superblocks.json"),
+    subprocess.run([str(RUN), *EXTRA, "--corpus", str(CORPUS),
+                    "--manifest", str(MANIFEST),
                     "--policy", "all", "--runs", "1", "--warmup", "0",
                     "--dump", str(dump_dir)] + args,
                    check=True, stdout=subprocess.DEVNULL)

@@ -1,1 +1,0 @@
-conduit_gpu info: GPU NVIDIA GeForce RTX 4050 Laptop GPU, 20 SMs, 5772 MiB, cc 8.9, driver 13.2, runtime 13.2; backend cuda; OpenMP on

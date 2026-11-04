@@ -22,6 +22,8 @@ section with a **Correction** note beside it, so the history remains readable.
 | C8 | The deepest dip's dominant selector `0x4a21a2df` is "unidentified", so whether it is a mint is "not established". | Phase 6 identity update (C6) | Phase 6 selector lookup | **Resolved: it is a mint.** 4byte.directory (accessed 2026-10-31) lists exactly one signature for `0x4a21a2df`: `mint((bytes32,bytes32[]),uint256,address,bytes)`, entry 860752. The `(bytes32, bytes32[])` argument has the shape of a Merkle allowlist proof. Together with the contract's NFT-style functions, the deepest dip is a **launch-day NFT mint on Broker Boy**. The first draft's "mint storm" was right for this dip; C6 over-corrected on that point. C6's other conclusions stand: it is a transient launch, and its contention is assumed at contract granularity. |
 | C9 | "Sorting takes 60–70% of the time … The parallel phases should focus on the sort first." | Phase 5 | Phase 7 | **True only for `std::sort`.** With a sequential LSD radix sort, the sort is 4–7x faster and falls to **23% (P1) and 39–43% (P2, P3)** of a 100k super-block. Extraction is then as large as the sort, the larger of the two under P1 (3.9 ms vs 2.5 ms). No single stage dominates the fair baseline. |
 | C10 | Parallel levelling "will need frontier-based relaxation instead", which "does more total work than the sequential sweep". | Phase 5 | Phase 7 | **Both parts wrong.** Frontier (Kahn) levelling does *the same* work, one relaxation per edge, but needs one synchronised round per level: 1,700–21,000 rounds. It is **2.6–5.2x slower than the sweep on one thread and up to 3,400x slower at 16**, getting slower with every added thread. Bellman-Ford, the variant that does more work (rounds × m relaxations), is slower still. Levelling should stay sequential: it is under 1 ms. |
+| C11 | "No GPU timing is reported here yet"; the cloud runs were labelled "GPU emulated", and one RTX 4050 folder was read as CPU-only. | Phase 8 | Phases 8–10 results | **Settled.** The RTX 4050 laptop runs used the CUDA backend (`gpu_info.txt`: backend cuda; 852 and 1,710 verify checks passed on the GPU). Only the cloud 2-vCPU folder is emulated; it is now named `cloud-2vcpu-emulated-no-calldata` and its GPU columns are correctness evidence, never timings. The final GPU numbers (Phases 8–10 below) come from a 2 warm-up + 7 run on a second RTX 4050 laptop; the first laptop's 1 + 2 run agrees at large sizes. |
+| C12 | Phase 8b: "P2/P3 ≈ P1" on the user dataset. | Phase 8b | Phases 8–10 results | **A property of the first export, not of the policies.** That export had no calldata, so every ERC-20 call fell back to contract granularity. With calldata for both days, full-day batches fall from 401,223 (P1) to 89,380 (P2) and 42,309 (P3) on Sep 1, and from 269,610 to 30,150 and 21,378 on Sep 13. |
 
 **How the explanation of the deepest dip evolved.** It was revised twice,
 then resolved:
@@ -1135,7 +1137,7 @@ seq-radix:
   from about 10–20k transactions upward. Real cores with pinning should do
   better; the benchmark machine will show how much.
 
-## Phase 8 — CUDA pipeline (implementation; GPU numbers pending)
+## Phase 8 — CUDA pipeline
 
 Design and correctness evidence only. **No GPU timing is reported here yet:**
 the code was written on a machine without a CUDA compiler, so every check
@@ -1143,6 +1145,10 @@ below ran through the host emulation (`--impl gpu-emu`), which executes the
 same kernel bodies (`src/gpu/kernels.hpp`) launch by launch. Fill in the
 timing subsections from `tools/run_phase8.sh` on the RTX 4050 machine.
 Full description: `GPU_README.md`.
+
+> **Correction (C11).** This paragraph described the state before the GPU
+> runs. The RTX 4050 runs used the CUDA backend; their timings are in the
+> results subsections below. Only the cloud folder is emulated.
 
 - **Stages 1–3 on the GPU**, levelling by the CPU sweep by default (as this
   file's Phase 7 result asks), with GPU Kahn and Jones–Plassmann as measured
@@ -1164,9 +1170,124 @@ Full description: `GPU_README.md`.
   transactions (O(rounds × active) work). Prediction to test on the GPU:
   stage 4 ranks sweep < Kahn < JP in time on deep graphs.
 
-### Phase 8 — crossover  [TODO on the GPU machine]
-### Phase 9 — skew: group (before) vs balanced (after) detection  [TODO]
-### Phase 10 — full sweep and profiler pass  [TODO]
+### Where the numbers come from
+
+Final run: `results/phase8/Nikhil-PC-real/` (standard 10k–100k super-blocks) and
+`results/phase8/Nikhil-PC-real-large/` (1k to the full day), Intel i5-13420H
+(12 hardware threads), RTX 4050 Laptop GPU, CUDA 12.6 under WSL2, AC power, both
+days with calldata. **2 warm-up + 7 measured runs, median**; above 250k transactions
+1 + 3 runs per configuration. Headline time is **wall time** (`t_wall_ms`): host
+staging, H2D, kernels, D2H and the CPU sweep. Speedups are given against all three
+baselines; seq-radix and OpenMP are the fair ones (C9). All five gates passed in both
+folders: 39 unit tests, `stages` (each GPU stage = CPU stage, all three detection
+mappings), `verify`, `identical` on every super-block, and the Python validator.
+
+Caveat: Windows was on the *Balanced* power plan (recorded in `machine.txt`), not
+*Best performance* as the review asked. The large-size results agree with the first
+laptop run (i7-13620H, same GPU model, 1 + 2 runs, kept in
+`results/phase8/sucheth-katte-ASUS-TUF-Gaming-real-large-quick/`); the small sizes
+do not, see the crossover below.
+
+### Phase 8 — crossover and cost
+
+- **100k super-block, Sep 1:** GPU wall 2.51 / 3.58 / 3.02 ms (P1/P2/P3) against
+  seq-radix 8.8 / 21.6 / 15.4 ms and OpenMP-8 5.5 / 13.2 / 8.6 ms:
+  **3.5 / 6.0 / 5.1× over seq-radix, 2.2 / 3.7 / 2.8× over OpenMP.**
+- **Full day:** Sep 1 (2,013,158 tx) GPU 53.5 / 73.2 / 63.5 ms: 4.5 / 7.5 / 7.5×
+  over seq-radix and 5.2 / 6.7 / 6.9× over OpenMP (10.9 / 16.0 / 16.3× over
+  seq-std). Sep 13 (1,476,230 tx) 36.8 / 52.8 / 44.8 ms: 4.5 / 6.5 / 6.9× and
+  5.4 / 6.3 / 6.7×.
+- **Crossover (measured, transfers charged):** the GPU beats seq-radix and the best
+  OpenMP run from **10k–20k transactions** (40k for Sep 13 under P1 in the standard
+  run). The GPU's fixed cost per call is 0.5–1.2 ms on this machine, against
+  0.15–0.19 ms on the first laptop, where the crossover was 2k–5k. Small-size GPU
+  medians are also noisy here (e.g. 1.9 ms at 5k but 0.8 ms at 10k, Sep 13 P1), so
+  the linear model around the crossover is unreliable on this run ("never" for two
+  fits). **The crossover is a property of the machine and its power state; the
+  large-size speedups are not.**
+- **Transfers.** Full day: 80.5 MB H2D in 6.4–6.5 ms and 27–32 MB D2H in
+  2.7–3.6 ms, **14–19% of wall**. The PCIe probe measured 10.1 GB/s H2D and
+  9.9 GB/s D2H pinned; its prediction for H2D (7.9 ms) is about 20% above the
+  measured copy.
+- **What the wall-minus-device gap is (review, Fix 3):** host staging of the input
+  into pinned buffers, 8–13 ms at full day (`t_host_prep_ms`), plus copying results
+  out, 1.4–2.5 ms (`t_host_post_ms`). Together they are the whole 10–16 ms gap;
+  device allocation is inside the device time.
+- **Where the device time goes (Sep 1 full day, P2):** sort 13.5 ms, detect 6.7,
+  H2D 6.4, CSR 4.7, D2H 3.6, extract 3.1; the CPU sweep adds 19.1 ms. **The CPU
+  sweep is now the largest single part of the wall time**: offloading stages 1–3
+  moved the bottleneck to stage 4.
+
+### Phase 9 — skew
+
+- **The hot key is the USDT contract account** (`0xdac17f…1ec7`): 20,805 records
+  at 100k, 388,725 at full day on Sep 1 (266,865 on Sep 13), 4–10% of all records.
+  Work imbalance (max ÷ mean per thread) with one thread per key group is 74,800
+  (P1) to 113,347 (P3) at full day.
+- **Before (one thread per key group):** 5.2 ms at 100k, 136–139 ms at full day.
+- **After (one thread per output edge, [Merrill & Garland 2016]):** 0.23 ms and
+  3.5 / 6.6 / 5.7 ms. **Recovery 22× at 100k (P1) and 39 / 21 / 24× at full day**;
+  Sep 13: 38 / 19 / 22×.
+- **Middle mapping (one thread per record):** 3.5 / 6.8 / 6.1 ms at full day,
+  within about 10% of the per-edge mapping. Its remaining imbalance (up to 5,627
+  under P3, from long runs of reads on one key) is small next to the per-group
+  imbalance, so on this data per-record work division recovers almost all of the
+  loss. The per-edge mapping is the one with a guarantee (imbalance 1 by
+  construction).
+
+### Stage 4 — levelling on the GPU (Phase 7 prediction tested)
+
+- **Kahn on the GPU** gives identical levels but needs one round per level:
+  401,223 / 89,380 / 42,309 rounds at full day (Sep 1). With all but 32 rounds in
+  one persistent block [Gupta et al. 2012], it takes 392 / 192 / 137 ms against
+  13.6 / 19.1 / 15.0 ms for the CPU sweep; Sep 13: 255 / 98 / 76 ms against
+  8.9 / 13.5 / 10.6 ms. **7–29× slower**, as Phase 7 predicted for deep, thin graphs
+  (C10; [Valiant 1990]).
+- **Jones–Plassmann** [Jones & Plassmann 1993] with block-order priority
+  reproduces the levels exactly (tests and `verify`). With random priority its
+  colour classes are conflict-free and reach the per-key lower bound almost exactly
+  (e.g. P2 at 100k on Sep 1: 2,144 batches = bound, against 2,181 levels), because
+  they may reorder transactions; that is only valid for an executor that does not
+  need block order. Each round rescans all uncoloured transactions, so JP is capped
+  at 250k.
+
+### Phase 10 — full sweep, profiler, execution model
+
+- **Batches per full day** (with calldata): Sep 1 401,223 / 89,380 / 42,309;
+  Sep 13 269,610 / 30,150 / 21,378 (P1/P2/P3). See C12.
+- **Profiler pass** (`results/phase10/Nikhil-PC-profile/`, Nsight Compute on the
+  Sep 1 full day, one pass): the CUB onesweep radix sort is 56–58% of kernel time.
+  The kernels that take the time are memory-bound: SM throughput 18–29% of peak
+  against memory throughput 36–85%, achieved occupancy 73–96%. Warp execution efficiency is
+  0.92–1.00 except **extraction under P2/P3, 0.64–0.67**, where threads of one warp
+  decode different call types and diverge; under P1 the same kernels run at 0.99.
+  This is the one place where the policy changes how well the GPU is used, not just
+  how much work there is. Nsight Systems recorded only host-side CUDA calls under
+  WSL2 (no GPU activity table), so the GPU timeline comes from the cudaEvent stage
+  timings above.
+- **Execution model, not an Ethereum client.** Each transaction does work
+  proportional to its gas on a toy state machine over its real keys; every parallel
+  run reproduced the serial final state and all outputs. With unlimited workers,
+  barrier-per-batch execution is bounded at 2.0× (P1) to 4.4× (P3) by the slowest
+  transaction in each batch, while dataflow on the DAG is bounded by the
+  gas-weighted critical path at 10.9–25.6× [Graham 1969; Kwok & Ahmad 1999].
+  Measured on 12 threads: dataflow 5.4–7.2×, level batches 1.1–2.7×, and
+  5.0–6.3× with the GPU preprocessing time charged.
+- **Interpretation.** The schedule that is cheap to compute (levels) is a poor
+  schedule to run with barriers; the same DAG run as dataflow gets about 3× more
+  from the same threads. This matches what speculative and dataflow executors
+  report qualitatively [Dickerson et al. 2017; Gelashvili et al. 2023]; we make no
+  claim to beat them.
+
+### Predictions checked, and still open
+
+- *"With 2 + 7 runs the medians move by less than 10%."* **Holds at large sizes,
+  not across machines at small ones:** full-day GPU walls are within 1–6% of the
+  first laptop's, while the fixed cost per call differs by 3–6×.
+- *"The CPU sweep becomes the bottleneck at full day."* **Confirmed** (19 of 73 ms
+  at Sep 1 P2, the largest single part).
+- Still open: a GPU levelling method that beats the sweep on these deep graphs. By
+  C10 and the Kahn result above, we do not expect one. *Prediction.*
 
 **Synthetic workloads** (`tools/synth_corpus.py`) are models, labelled
 synthetic wherever used. The eth-like scenario is calibrated only to the
@@ -1174,6 +1295,9 @@ shape of Phase 6 (P1 ≈ 7×, P3 ≈ 37× at 100k, hot-wallet nonce floor), not 
 its distribution.
 
 ## Phase 8b — full-day run on the user dataset (2026-09-01, all 2,013,158 tx)
+
+> **Correction (C12).** "P2/P3 ≈ P1" below is caused by the missing calldata,
+> not by the policies. With calldata, see the Phase 8–10 results above.
 
 Input: one BigQuery export of 2026-09-01 (7,172 blocks), **without calldata**,
 ingested with `ingest.py --tx` (nothing dropped). Machine: cloud dev

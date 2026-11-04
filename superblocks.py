@@ -27,7 +27,13 @@ import numpy as np
 
 from access_sets import CORPUS, DTYPE
 
-MANIFEST = Path(__file__).parent / "superblocks.json"
+import os  # noqa: E402
+
+# Manifest: $CONDUIT_MANIFEST, else <corpus>/superblocks.json if ingest.py
+# wrote one next to the corpus, else the repository's superblocks.json.
+MANIFEST = Path(os.environ.get("CONDUIT_MANIFEST") or (
+    CORPUS / "superblocks.json" if (CORPUS / "superblocks.json").exists()
+    else Path(__file__).parent / "superblocks.json"))
 TARGETS = (10_000, 20_000, 40_000, 60_000, 80_000, 100_000)
 RULE = ("greedy whole-block tiling from the first block of each day; "
         "tail below target dropped")

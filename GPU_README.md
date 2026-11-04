@@ -11,12 +11,14 @@ verified CPU pipeline (Phases 0–7, see `handover.md` and `findings.md`) with:
 | Host emulation of every kernel (runs without a GPU) | `src/gpu/emu_pipeline.cpp` |
 | GPU API (`run_pipeline_gpu`, options, timings) | `include/conduit/gpu.hpp` |
 | Jones–Plassmann batching on the implicit conflict graph | `kernels.hpp` (`jp_phase_*`) |
-| Phase 9 skew fix: one thread per **edge** instead of per key | `kernels.hpp` (`record_count`, `edge_emit`) |
+| Phase 9 skew: three detection mappings, one thread per key group (`group`), per record (`record`), per output edge (`balanced`) | `kernels.hpp` (`walk_group`, `record_emit`, `record_count` + `edge_emit`) |
 | Schedule checks, lower bound, execution simulator | `include/conduit/schedule.hpp`, `src/schedule.cpp` |
-| Driver: `info`, `verify`, `bench`, `schedule` | `tools/conduit_gpu.cpp` |
+| Driver: `info`, `pcie`, `verify`, `stages`, `bench`, `skew`, `schedule`, `execute` | `tools/conduit_gpu.cpp` |
+| Execution model: serial, level batches, DAG dataflow | `include/conduit/execute.hpp`, `src/execute.cpp` |
+| Visualizer recorder (runs the real stages on a small block) | `tools/conduit_trace.cpp`, `visualizer/` |
 | Synthetic corpus (factorial workloads, Ethereum-like mix) | `tools/synth_corpus.py` |
-| One-command run on the GPU machine | `tools/run_phase8.sh` |
-| Tables + figures from the CSVs | `report_gpu.py` |
+| One-command runs on the GPU machine | `tools/run_phase8.sh` (standard sizes), `tools/run_dataset.sh` (up to the full day), `tools/profile.sh` (Phase 10 profiler) |
+| Tables + figures from the CSVs | `report_gpu.py`, `report_profile.py` |
 | Unit tests (GPU paths, JP, oracle, simulator) | `tests/test_gpu.inc` |
 
 `--impl cuda` and `--impl gpu-emu` also work in the existing tools (`conduit_run`,
@@ -196,18 +198,36 @@ through the normal Windows driver).
 
 ### One command (everything, in order, with correctness gates)
 ```sh
-tools/run_phase8.sh --synthetic          # synthetic corpus (generated on first run)
-tools/run_phase8.sh                      # real corpus, if corpus/ exists (see handover.md)
-tools/run_phase8.sh --quick --profile    # fewer repetitions + Nsight profiles
+bash tools/run_phase8.sh                 # real corpus/ (10k-100k), 2 warm-up + 7 runs
+bash tools/run_dataset.sh data           # every size up to the full day + execution model
+bash tools/run_phase8.sh --synthetic     # synthetic corpus (generated on first run)
+bash tools/profile.sh                    # Phase 10: Nsight Systems + Nsight Compute
+# --quick = 1 warm-up + 2 runs, smoke test only; --profile adds the profiler pass
 ```
-Output: `results/phase8/<host>-<synthetic|real>/` with `machine.txt`, `tests.txt`,
-`verify.txt`, `bench.csv`, `schedule.csv`, `summary.md`, `fig_e2e_vs_size.png`.
+Every script runs the gates in this order and **stops at the first failure**:
+unit tests → `conduit_gpu stages` → `conduit_gpu verify` → `conduit_bench identical`
+→ Python validator (`report_oracle.py` + `tools/verify_cpp.py --impl cuda`). Only
+then: `pcie`, `bench`, `skew`, `schedule` (and `execute` in `run_dataset.sh`).
+Output: `results/phase8/<host>-real[-large]/` with `machine.txt` (CPU, GPU clocks, AC
+power and Windows power plan), the gate logs, `pcie.csv`, `bench.csv`, `skew.csv`,
+`schedule.csv`, `execute.csv`, `summary.md` and figures.
+
+### Phase-by-phase commands
+```sh
+build/conduit_gpu stages --target 100000   # Phase 8: each GPU stage vs the CPU stage, all mappings
+build/conduit_gpu pcie                     # pinned/pageable H2D, D2H, launch and sync latency
+build/conduit_gpu skew --full              # Phase 9: hot key, imbalance, group/record/balanced
+build/conduit_gpu bench --csv bench.csv --configs full   # Phase 8/10 factorial sweep
+build/conduit_gpu schedule --csv schedule.csv            # batches vs bound, JP-random
+build/conduit_gpu execute --full           # execution model over the whole day
+bash tools/profile.sh --id 2026-09-01/full # Phase 10 profiler pass
+```
 
 ### Step by step
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release     # look for "conduit: CUDA 12.x enabled"
 cmake --build build -j
-build/conduit_tests                                 # "36 tests, 0 failed checks"
+build/conduit_tests                                 # "39 tests, 0 failed checks"
 build/conduit_gpu info                              # "GPU NVIDIA GeForce RTX 4050 ... backend cuda"
 
 python3 tools/synth_corpus.py --out corpus_synth    # 1.1M synthetic tx, 5 scenarios, 215 super-blocks
@@ -227,6 +247,11 @@ With the real corpus, drop `$S` and additionally run
 | Option | Meaning |
 |---|---|
 | `--backend cuda\|emu` | force the GPU or the emulation (`emu` = correctness only) |
+| `--configs full` | includes all three detection mappings (group, record, balanced) |
+| `--runs N --warmup W` | measured runs and warm-ups (default 7 and 2) |
+| `--jp-max N` | skip Jones–Plassmann above N transactions (default 250000) |
+| `--tail T`, `--chunk C` | persistent-block threshold and launch chunk for Kahn/JP |
+| `CONDUIT_CORPUS`, `CONDUIT_MANIFEST` | environment overrides; the manifest next to the corpus is used by default |
 | `--configs quick\|full` | `full` = every detect × level combination |
 | `--limits 1000,2000,5000` | prefixes of the 10k super-block, to locate the crossover |
 | `--threads 1,2,4,8,16` | OpenMP thread counts for the CPU comparison |
@@ -244,18 +269,20 @@ These are models; label anything measured on them *synthetic* (non-negotiable 5)
 
 ## 6. Reading the results
 
-* **RQ1/RQ2 — speedup of stages 1–3.** `summary.md` table "End-to-end time": GPU e2e
-  (H2D + kernels + D2H + CPU sweep) against seq-std, seq-radix and the best OpenMP run,
+* **RQ1/RQ2 — speedup of stages 1–3.** `summary.md` table "end to end, wall time": GPU
+  wall (host staging + H2D + kernels + D2H + CPU sweep, `t_wall_ms`) against seq-std, seq-radix and the best OpenMP run,
   each labelled. `k-only` shows the kernels alone. The crossover table gives the smallest
   tested size where the GPU wins *with transfers charged*. If it says "never", that is
   the result (handover: "if transfer dominates at every testable size, that IS the
   result") — report the transfer arithmetic from the stage-breakdown table.
-* **Phase 9 — skew.** "detect group" (before) vs "detect balanced" (after) at the largest
-  super-block, with the size of the hottest key group.
+* **Phase 9 — skew.** `skew.csv`: the hottest key (named), work imbalance (max ÷ mean per
+  thread) and detect time for the three mappings; recovery = group ÷ balanced.
 * **RQ3 — scheduling.** Stage-4 table: rounds, how many ran in the persistent block,
   launches, time of sweep vs Kahn vs JP. Schedule table: batches vs the lower bound and
   simulated execution speedups.
-* **Profiler pass.** `--profile` writes `nsys_p3.nsys-rep` (timeline: launch gaps,
+* **Profiler pass.** `tools/profile.sh` writes `profile_summary.md` (per-kernel achieved
+  occupancy, memory and DRAM throughput, warp execution efficiency, branch efficiency, from
+  `ncu --csv`) plus `nsys_p3.nsys-rep` (timeline: launch gaps,
   memcpy) and `ncu_p3.ncu-rep` (occupancy, memory throughput, warp divergence per
   kernel). Open them with Nsight Systems / Nsight Compute on Windows. On WSL2, `ncu`
   needs GPU performance counters enabled for all users (NVIDIA Control Panel → Desktop →
@@ -308,7 +335,11 @@ expensive transaction.
 * Jones–Plassmann is skipped above 250k transactions (`--jp-max`): its O(rounds × active)
   work explodes on a 400k-round day.
 
-### Results already measured on your file (dev container, 2 vCPU, GPU emulated)
+### First results on this file (dev container, 2 vCPU, GPU emulated, no calldata)
+
+Kept for the record; see `findings.md` C11 and C12. The laptop results with calldata are
+in `README.md` and `results/phase8/sucheth-katte-ASUS-TUF-Gaming-real-large-quick/`.
+
 | policy | batches (full day) | per-key lower bound | model speedup, level batches (W=∞) | model speedup, DAG dataflow (W=∞) | measured DAG, 2 threads |
 |---|---:|---:|---:|---:|---:|
 | P1 | 401,223 | 388,725 | 1.99× | 10.93× | 1.63× |
@@ -319,7 +350,7 @@ the 400k batches waits for its slowest transaction. **DAG dataflow raises the ce
 ~11×** on the same dependency information. That is the algorithmic improvement; your
 laptop's cores and GPU determine how much of it is realised.
 
-### Why P2/P3 look like P1 on this file, and how to fix it
+### Why P2/P3 looked like P1 on the first export (fixed by the calldata files)
 Your export has `selector` but **no calldata**, so for the 725,509 ERC-20
 `transfer/approve/transferFrom` calls the recipient is unknown. To stay correct the
 policies must then assume the call may touch any holder of that token, i.e. lock the whole
@@ -341,21 +372,42 @@ FROM `bigquery-public-data.crypto_ethereum.transactions`
 WHERE DATE(block_timestamp) = '2026-09-01'
   AND SUBSTR(input, 1, 10) IN ('0xa9059cbb', '0x095ea7b3', '0x23b872dd')
 ```
-Save the result as CSV into the same `data/` folder, delete `corpus_eth/`, and rerun:
-`ingest.py` detects calldata files by their header automatically.
+Save the result as CSV into the same `data/` folder, delete `corpus_eth/`, and rerun.
+`ingest.py` recognises transaction exports by their header and matches them to days by
+`block_timestamp`; calldata files must contain the date (`YYYYMMDD`) in their name. With
+the four files now in `data/` (two days, transactions + calldata), full-day batches are
+401,223 / 89,380 / 42,309 (Sep 1) and 269,610 / 30,150 / 21,378 (Sep 13).
 
 ### Commands
 ```sh
 cd ~/conduit
 bash tools/run_dataset.sh data --quick      # first run, ~10-20 min
 bash tools/run_dataset.sh data              # final numbers for the report
-# results: results/dataset/<pc-name>/summary.md, fig_e2e_vs_size.png, fig_execution_speedup.png
+# results: results/phase8/<host>-real-large/summary.md and figures
 
 # individual steps
 python3 ingest.py --tx data --out corpus_eth
-S="--corpus corpus_eth --manifest corpus_eth/superblocks.json"
+export CONDUIT_CORPUS=corpus_eth                 # tools use corpus_eth/superblocks.json
+S=""
 build/conduit_gpu verify  $S                      # GPU == CPU on 10k ... full day
 build/conduit_run         $S --id 2026-09-01/full --impl cuda    # whole day on the GPU
 build/conduit_gpu execute $S --full               # execute all 2,013,158 transactions
 build/conduit_gpu bench   $S --csv bench.csv      # CPU vs OpenMP vs GPU, 10k ... 2M
 ```
+
+## 9. The visualizer
+
+`visualizer/index.html` (open it directly in a browser, no server) steps through every
+stage on a small block, with live animations (Pause, Restart, slider, speed) for the
+parallel steps: read/write sets, records, the radix sort, group and run heads, the
+reduced edge rule, CSR, DAG, levels, the conflict graph, Jones–Plassmann rounds (index or
+random priority) and the four execution strategies as Gantt charts. The data come from
+`build/conduit_trace`, which runs the CPU stages and the GPU kernel bodies on the block,
+checks they agree, and writes `visualizer/trace_data.js`:
+
+```sh
+build/conduit_trace --example                                   # 12-transaction teaching block
+build/conduit_trace --id 2026-09-01/10k/000 --auto --limit 14 --append
+build/conduit_trace --id 2026-09-13/10k/000 --auto --limit 16 --append
+```
+`--auto` picks the window of that size with the most conflicts; `--offset` picks one by hand.

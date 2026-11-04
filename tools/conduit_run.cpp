@@ -85,7 +85,7 @@ std::string file_tag(const std::string& id) {
 }  // namespace
 
 int main(int argc, char** argv) {
-    std::string corpus_dir = "corpus", manifest_path = "superblocks.json", policy_arg = "all";
+    std::string corpus_dir = default_corpus_dir(), manifest_path, policy_arg = "all";
     std::string dump_dir;
     std::vector<std::string> ids;
     bool use_median = false, use_all = false, quiet = false;
@@ -131,7 +131,7 @@ int main(int argc, char** argv) {
     if (!level_set) opts.level = default_level(opts.impl);
     try {
         Corpus corpus(corpus_dir);
-        Manifest manifest = load_manifest(manifest_path, corpus);
+        Manifest manifest = load_manifest(resolve_manifest(manifest_path, corpus_dir), corpus);
         Selectors sels(corpus.selectors);
 
         std::vector<const SuperBlock*> chosen;

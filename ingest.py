@@ -151,6 +151,44 @@ def load_calldata(path):
     return out, stats
 
 
+def find_by_date(date, kind):
+    """A CSV in data/ for this day when the expected name is missing: a
+    transaction export whose first row has this block_timestamp date, or a
+    calldata export whose file name contains the date (YYYYMMDD)."""
+    stamp = date.replace("-", "")
+    for p in sorted(UPLOADS.glob("*.csv")):
+        with open(p, newline="") as f:
+            r = csv.reader(f)
+            header = next(r, [])
+            row = next(r, [])
+        if kind == "tx" and "from_address" in header and "block_timestamp" in header:
+            if row and row[header.index("block_timestamp")].startswith(date):
+                return p
+        if kind == "calldata" and "from_address" not in header and "input_len" in header \
+                and stamp in p.name:
+            return p
+    return None
+
+
+def write_local_manifest(out):
+    """superblocks.json next to the corpus (tools prefer it), and a check that
+    the super-block boundaries equal the repository's Phase 6 manifest."""
+    from superblocks import TARGETS, build_manifest, dumps
+    m = build_manifest(corpus=out, targets=TARGETS)
+    (out / "superblocks.json").write_text(dumps(m))
+    root = Path(__file__).parent / "superblocks.json"
+    if root.exists():
+        old = json.load(open(root))
+        same_sha = old["corpus"]["tx_bin_sha256"] == m["corpus"]["tx_bin_sha256"]
+        o = {e["id"]: e for e in old["superblocks"]}
+        n = {e["id"]: e for e in m["superblocks"]}
+        same = sum(1 for k in o if n.get(k) == o[k])
+        print(f"\nmanifest {out}/superblocks.json: {same} of {len(o)} Phase 6 super-blocks "
+              f"have identical boundaries; tx.bin SHA {'matches' if same_sha else 'differs'} "
+              "(address ids follow CSV row order, so a re-exported CSV renumbers them; "
+              "results do not depend on the numbering)")
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     addrs = Interner()
@@ -166,9 +204,14 @@ def main():
     for day_id, (date, tx_name, cd_name) in enumerate(DAYS):
         tx_path = UPLOADS / tx_name
         cd_path = UPLOADS / cd_name
+        if not tx_path.exists():
+            tx_path = find_by_date(date, "tx") or tx_path
+        if not cd_path.exists():
+            cd_path = find_by_date(date, "calldata") or cd_path
         for p in (tx_path, cd_path):
             if not p.exists():
                 sys.exit(f"missing input: {p}")
+        print(f"[{date}] inputs: {tx_path.name}, {cd_path.name}", flush=True)
 
         print(f"[{date}] loading calldata ...", flush=True)
         calldata, cd_stats = load_calldata(cd_path)
@@ -297,6 +340,7 @@ def main():
     print(f"\n{global_idx:,} transactions, "
           f"{len(addrs.list):,} distinct addresses, "
           f"{len(sels.list):,} distinct selectors")
+    write_local_manifest(OUT)
 
 
 # ---- generic mode: any BigQuery-style transaction export ----------------------
@@ -541,9 +585,11 @@ def main_files(argv):
         print(f"note: {stats['duplicates']:,} duplicate (block, index) rows dropped")
     if stats["token_calls"] and stats["token_calls_decoded"] < stats["token_calls"]:
         miss = stats["token_calls"] - stats["token_calls_decoded"]
+        why = "no calldata file was given" if not cd_files else \
+            "calldata missing, truncated or malformed for these calls"
         print(f"note: {miss:,} of {stats['token_calls']:,} ERC-20 transfer/approve/transferFrom "
-              "calls have no decoded operands (no calldata file): P2/P3 treat them at contract "
-              "granularity, so P2/P3 parallelism is a conservative lower bound.")
+              f"calls have no decoded operands ({why}): P2/P3 treat them at contract "
+              "granularity" + (", so P2/P3 collapse towards P1" if not cd_files else "") + ".")
 
 
 DTYPE_ARR = None

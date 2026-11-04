@@ -23,7 +23,7 @@ static void write_or_die(std::FILE* f, const void* p, size_t bytes) {
 }
 
 int main(int argc, char** argv) {
-    std::string corpus_dir = "corpus", manifest_path = "superblocks.json";
+    std::string corpus_dir = default_corpus_dir(), manifest_path;
     std::string policy, out, id;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
@@ -48,7 +48,7 @@ int main(int argc, char** argv) {
         const Tx* tx = corpus.tx();
         size_t n = corpus.size();
         if (!id.empty()) {
-            Manifest m = load_manifest(manifest_path, corpus);
+            Manifest m = load_manifest(resolve_manifest(manifest_path, corpus_dir), corpus);
             const SuperBlock& sb = m.get(id);
             tx += sb.tx_start;
             n = sb.tx_count;

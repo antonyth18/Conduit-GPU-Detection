@@ -1,0 +1,5 @@
+date: 2026-11-04T07:16:13Z  host: Nikhil-PC  super-block: 2026-09-01/full
+name, memory.total [MiB], driver_version, clocks.max.sm [MHz]
+NVIDIA GeForce RTX 4050 Laptop GPU, 6141 MiB, 610.91, 3105 MHz
+Version 2024.3.2.0 (build 34861637) (public-release)
+NVIDIA Nsight Systems version 2024.5.1.113-245134619542v0

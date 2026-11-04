@@ -1,0 +1,13 @@
+-- conduit: OpenMP 4.5 enabled
+-- conduit: CUDA 12.6.85 enabled, architectures 89
+-- Configuring done (121.1s)
+-- Generating done (0.0s)
+-- Build files have been written to: /home/nikhil1/conduit/build
+[ 48%] Built target conduit
+[ 55%] Built target conduit_gpu
+[ 66%] Built target dump_access
+[ 70%] Built target conduit_run
+[ 77%] Built target conduit_tests
+[ 85%] Built target membw
+[ 92%] Built target conduit_bench
+[100%] Built target conduit_trace

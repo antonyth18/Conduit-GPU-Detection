@@ -12,8 +12,9 @@ GpuBackend parse_gpu_backend(const std::string& s) {
 
 DetectMode parse_detect(const std::string& s) {
     if (s == "group") return DetectMode::Group;
+    if (s == "record") return DetectMode::Record;
     if (s == "balanced") return DetectMode::Balanced;
-    throw std::runtime_error("unknown detect mode " + s + " (group | balanced)");
+    throw std::runtime_error("unknown detect mode " + s + " (group | record | balanced)");
 }
 
 GpuLevel parse_gpu_level(const std::string& s) {
@@ -25,7 +26,9 @@ GpuLevel parse_gpu_level(const std::string& s) {
 }
 
 const char* gpu_backend_name(GpuBackend b) { return b == GpuBackend::Cuda ? "cuda" : "emu"; }
-const char* detect_name(DetectMode d) { return d == DetectMode::Group ? "group" : "balanced"; }
+const char* detect_name(DetectMode d) {
+    return d == DetectMode::Group ? "group" : d == DetectMode::Record ? "record" : "balanced";
+}
 const char* gpu_level_name(GpuLevel l) {
     switch (l) {
         case GpuLevel::Sweep: return "sweep";
@@ -39,6 +42,9 @@ const char* gpu_level_name(GpuLevel l) {
 #ifndef CONDUIT_HAVE_CUDA
 bool have_cuda() { return false; }
 std::string cuda_device_info() { return "built without CUDA (CONDUIT_HAVE_CUDA undefined)"; }
+PcieProbe pcie_probe(const std::vector<size_t>&, int) {
+    throw std::runtime_error("the PCIe probe needs the CUDA backend");
+}
 namespace gpu_detail {
 Result run_cuda(const Tx*, size_t, Policy, const Selectors&, const GpuOptions&, GpuTimings*) {
     throw std::runtime_error("this build has no CUDA backend; reconfigure with the CUDA toolkit "

@@ -5,6 +5,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <stdexcept>
@@ -121,6 +122,20 @@ Manifest load_manifest(const std::string& path, const Corpus& corpus, bool verif
                                      "...; rebuild the manifest");
     }
     return out;
+}
+
+std::string default_corpus_dir() {
+    const char* e = std::getenv("CONDUIT_CORPUS");
+    return e && *e ? std::string(e) : std::string("corpus");
+}
+
+std::string resolve_manifest(const std::string& explicit_path, const std::string& corpus_dir) {
+    if (!explicit_path.empty()) return explicit_path;
+    const char* e = std::getenv("CONDUIT_MANIFEST");
+    if (e && *e) return e;
+    const std::string local = corpus_dir + "/superblocks.json";
+    if (std::ifstream(local).good()) return local;
+    return "superblocks.json";
 }
 
 }  // namespace conduit

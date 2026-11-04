@@ -1,0 +1,4 @@
+conduit_bench identical: OpenMP on, max threads 12, procs 12
+GPU: NVIDIA GeForce RTX 4050 Laptop GPU, 20 SMs, 6140 MiB, cc 8.9, driver 13.3, runtime 12.6
+13335 comparisons against seq-std, 0 mismatches (202.47 s)
+ALL IDENTICAL

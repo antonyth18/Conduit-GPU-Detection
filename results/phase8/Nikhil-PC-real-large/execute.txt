@@ -1,0 +1,123 @@
+conduit_gpu execute: GPU NVIDIA GeForce RTX 4050 Laptop GPU, 20 SMs, 6140 MiB, cc 8.9, driver 13.3, runtime 12.6; backend cuda; OpenMP on
+
+=== 2026-09-01/full  policy P1  (2013158 transactions) ===
+preprocessing (conflicts + DAG + levels): seq-std 559.8 ms, OpenMP(12) 273.0 ms, cuda 48.3 ms  -> 401223 batches, 3070055 edges, identical output
+executor                   threads    seconds   speedup     executed  final state == serial
+serial (block order)             1      3.008      1.00      2013158  reference
+level batches + barriers         1      3.205      0.94      2013158  yes
+level batches + barriers         2      2.864      1.05      2013158  yes
+level batches + barriers         4      2.833      1.06      2013158  yes
+level batches + barriers         8      2.916      1.03      2013158  yes
+level batches + barriers        12      5.275      0.57      2013158  yes
+DAG dataflow (no barrier)        1      3.321      0.91      2013158  yes
+DAG dataflow (no barrier)        2      1.695      1.77      2013158  yes
+DAG dataflow (no barrier)        4      0.905      3.32      2013158  yes
+DAG dataflow (no barrier)        8      0.554      5.43      2013158  yes
+DAG dataflow (no barrier)       12      0.575      5.23      2013158  yes
+model (gas-weighted), speedup over serial on W workers:
+  W =                             8       16       32       64      inf
+  level batches                1.95     1.97     1.98     1.99     1.99
+  DAG dataflow                 7.99    10.92    10.93    10.93    10.93
+END TO END: serial execution 3.008 s  vs  cuda preprocessing + DAG execution 0.602 s  =  5.00x faster (levels+barriers: 1.04x); all 2013158 transactions executed, final state identical
+
+=== 2026-09-01/full  policy P2  (2013158 transactions) ===
+preprocessing (conflicts + DAG + levels): seq-std 1119.7 ms, OpenMP(12) 506.4 ms, cuda 73.5 ms  -> 89380 batches, 3921028 edges, identical output
+executor                   threads    seconds   speedup     executed  final state == serial
+serial (block order)             1      3.079      1.00      2013158  reference
+level batches + barriers         1      3.307      0.93      2013158  yes
+level batches + barriers         2      2.059      1.50      2013158  yes
+level batches + barriers         4      1.611      1.91      2013158  yes
+level batches + barriers         8      1.519      2.03      2013158  yes
+level batches + barriers        12      2.521      1.22      2013158  yes
+DAG dataflow (no barrier)        1      3.503      0.88      2013158  yes
+DAG dataflow (no barrier)        2      1.779      1.73      2013158  yes
+DAG dataflow (no barrier)        4      0.930      3.31      2013158  yes
+DAG dataflow (no barrier)        8      0.526      5.86      2013158  yes
+DAG dataflow (no barrier)       12      0.432      7.14      2013158  yes
+model (gas-weighted), speedup over serial on W workers:
+  W =                             8       16       32       64      inf
+  level batches                3.36     3.52     3.56     3.57     3.58
+  DAG dataflow                 7.99    14.55    24.47    24.78    24.78
+END TO END: serial execution 3.079 s  vs  cuda preprocessing + DAG execution 0.505 s  =  6.10x faster (levels+barriers: 1.93x); all 2013158 transactions executed, final state identical
+
+=== 2026-09-01/full  policy P3  (2013158 transactions) ===
+preprocessing (conflicts + DAG + levels): seq-std 987.6 ms, OpenMP(12) 424.2 ms, cuda 61.8 ms  -> 42309 batches, 2613061 edges, identical output
+executor                   threads    seconds   speedup     executed  final state == serial
+serial (block order)             1      3.062      1.00      2013158  reference
+level batches + barriers         1      3.237      0.95      2013158  yes
+level batches + barriers         2      1.953      1.57      2013158  yes
+level batches + barriers         4      1.446      2.12      2013158  yes
+level batches + barriers         8      1.336      2.29      2013158  yes
+level batches + barriers        12      2.184      1.40      2013158  yes
+DAG dataflow (no barrier)        1      3.509      0.87      2013158  yes
+DAG dataflow (no barrier)        2      1.770      1.73      2013158  yes
+DAG dataflow (no barrier)        4      0.921      3.33      2013158  yes
+DAG dataflow (no barrier)        8      0.520      5.89      2013158  yes
+DAG dataflow (no barrier)       12      0.426      7.18      2013158  yes
+model (gas-weighted), speedup over serial on W workers:
+  W =                             8       16       32       64      inf
+  level batches                3.86     4.15     4.26     4.30     4.33
+  DAG dataflow                 7.99    14.56    24.91    25.58    25.58
+END TO END: serial execution 3.062 s  vs  cuda preprocessing + DAG execution 0.488 s  =  6.27x faster (levels+barriers: 2.19x); all 2013158 transactions executed, final state identical
+
+=== 2026-09-13/full  policy P1  (1476230 transactions) ===
+preprocessing (conflicts + DAG + levels): seq-std 391.3 ms, OpenMP(12) 152.5 ms, cuda 37.1 ms  -> 269610 batches, 2260858 edges, identical output
+executor                   threads    seconds   speedup     executed  final state == serial
+serial (block order)             1      3.008      1.00      1476230  reference
+level batches + barriers         1      3.169      0.95      1476230  yes
+level batches + barriers         2      2.714      1.11      1476230  yes
+level batches + barriers         4      2.601      1.16      1476230  yes
+level batches + barriers         8      2.618      1.15      1476230  yes
+level batches + barriers        12      4.306      0.70      1476230  yes
+DAG dataflow (no barrier)        1      3.310      0.91      1476230  yes
+DAG dataflow (no barrier)        2      1.653      1.82      1476230  yes
+DAG dataflow (no barrier)        4      0.870      3.46      1476230  yes
+DAG dataflow (no barrier)        8      0.501      6.01      1476230  yes
+DAG dataflow (no barrier)       12      0.486      6.19      1476230  yes
+model (gas-weighted), speedup over serial on W workers:
+  W =                             8       16       32       64      inf
+  level batches                1.93     1.96     1.97     1.97     1.97
+  DAG dataflow                 7.99    12.29    12.93    12.94    12.94
+END TO END: serial execution 3.008 s  vs  cuda preprocessing + DAG execution 0.523 s  =  5.75x faster (levels+barriers: 1.14x); all 1476230 transactions executed, final state identical
+
+=== 2026-09-13/full  policy P2  (1476230 transactions) ===
+preprocessing (conflicts + DAG + levels): seq-std 809.2 ms, OpenMP(12) 335.3 ms, cuda 51.5 ms  -> 30150 batches, 2826334 edges, identical output
+executor                   threads    seconds   speedup     executed  final state == serial
+serial (block order)             1      3.033      1.00      1476230  reference
+level batches + barriers         1      3.200      0.95      1476230  yes
+level batches + barriers         2      1.948      1.56      1476230  yes
+level batches + barriers         4      1.465      2.07      1476230  yes
+level batches + barriers         8      1.327      2.28      1476230  yes
+level batches + barriers        12      2.140      1.42      1476230  yes
+DAG dataflow (no barrier)        1      3.407      0.89      1476230  yes
+DAG dataflow (no barrier)        2      1.708      1.78      1476230  yes
+DAG dataflow (no barrier)        4      0.891      3.40      1476230  yes
+DAG dataflow (no barrier)        8      0.495      6.12      1476230  yes
+DAG dataflow (no barrier)       12      0.433      7.01      1476230  yes
+model (gas-weighted), speedup over serial on W workers:
+  W =                             8       16       32       64      inf
+  level batches                3.47     3.61     3.65     3.66     3.67
+  DAG dataflow                 7.99    12.73    13.39    13.43    13.43
+END TO END: serial execution 3.033 s  vs  cuda preprocessing + DAG execution 0.484 s  =  6.26x faster (levels+barriers: 2.20x); all 1476230 transactions executed, final state identical
+
+=== 2026-09-13/full  policy P3  (1476230 transactions) ===
+preprocessing (conflicts + DAG + levels): seq-std 713.3 ms, OpenMP(12) 279.7 ms, cuda 45.8 ms  -> 21378 batches, 1926697 edges, identical output
+executor                   threads    seconds   speedup     executed  final state == serial
+serial (block order)             1      3.047      1.00      1476230  reference
+level batches + barriers         1      3.195      0.95      1476230  yes
+level batches + barriers         2      1.880      1.62      1476230  yes
+level batches + barriers         4      1.340      2.27      1476230  yes
+level batches + barriers         8      1.146      2.66      1476230  yes
+level batches + barriers        12      1.763      1.73      1476230  yes
+DAG dataflow (no barrier)        1      3.411      0.89      1476230  yes
+DAG dataflow (no barrier)        2      1.712      1.78      1476230  yes
+DAG dataflow (no barrier)        4      0.892      3.42      1476230  yes
+DAG dataflow (no barrier)        8      0.509      5.99      1476230  yes
+DAG dataflow (no barrier)       12      0.458      6.65      1476230  yes
+model (gas-weighted), speedup over serial on W workers:
+  W =                             8       16       32       64      inf
+  level batches                4.02     4.28     4.37     4.40     4.42
+  DAG dataflow                 7.99    12.74    13.42    13.43    13.43
+END TO END: serial execution 3.047 s  vs  cuda preprocessing + DAG execution 0.504 s  =  6.04x faster (levels+barriers: 2.56x); all 1476230 transactions executed, final state identical
+
+wrote results/phase8/Nikhil-PC-real-large/execute.csv

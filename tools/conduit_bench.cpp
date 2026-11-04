@@ -64,7 +64,7 @@ bool same(const Result& a, const Result& b) {
 }
 
 struct Common {
-    std::string corpus = "corpus", manifest = "superblocks.json";
+    std::string corpus = default_corpus_dir(), manifest;
     std::vector<int> threads = {1, 2, 4, 8};
     std::vector<Policy> policies = {Policy::P1, Policy::P2, Policy::P3};
 };
@@ -78,7 +78,8 @@ int run_identical(const Corpus& corpus, const Manifest& m, const Selectors& sels
         if (target && sb.target != target) continue;
         const Tx* tx = corpus.tx() + sb.tx_start;
         const size_t n = sb.tx_count;
-        const bool bf = bf_every > 0 && k++ % uint64_t(bf_every) == 0;
+        // Bellman-Ford does rounds x m work: only on the standard sizes
+        const bool bf = bf_every > 0 && k++ % uint64_t(bf_every) == 0 && n <= 100000;
         for (Policy p : c.policies) {
             Options base;
             const Result ref = run_pipeline(tx, n, p, sels, base);
@@ -285,7 +286,7 @@ int main(int argc, char** argv) {
     }
     try {
         Corpus corpus(c.corpus);
-        Manifest m = load_manifest(c.manifest, corpus);
+        Manifest m = load_manifest(resolve_manifest(c.manifest, c.corpus), corpus);
         Selectors sels(corpus.selectors);
         std::cout << "conduit_bench " << mode << ": OpenMP " << (have_openmp() ? "on" : "off");
 #ifdef CONDUIT_HAVE_OPENMP

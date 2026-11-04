@@ -30,11 +30,13 @@ Output is CSR: offsets[i]:offsets[i+1] indexes keys/modes for transaction i,
 with keys ascending within each transaction and each key at most once.
 """
 import json
+import os
 from pathlib import Path
 
 import numpy as np
 
-CORPUS = Path(__file__).parent / "corpus"
+# $CONDUIT_CORPUS selects another corpus directory (e.g. corpus_eth/)
+CORPUS = Path(os.environ.get("CONDUIT_CORPUS") or Path(__file__).parent / "corpus")
 ABSENT = 0xFFFFFFFF
 
 DTYPE = np.dtype([

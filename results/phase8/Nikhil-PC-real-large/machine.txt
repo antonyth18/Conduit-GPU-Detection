@@ -1,0 +1,43 @@
+date: 2026-11-04T03:50:58Z
+host: Nikhil-PC
+git: unknown
+run: run_dataset.sh data=data runs=2+7 threads=1,2,4,8,12 backend=cuda
+OMP_PROC_BIND=close OMP_PLACES=cores
+
+## OS
+Linux Nikhil-PC 6.18.54.1-microsoft-standard-WSL2 #1 SMP PREEMPT_DYNAMIC Tue Oct  6 19:13:07 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
+WSL2: yes
+PRETTY_NAME="Ubuntu 24.04.5 LTS"
+NAME="Ubuntu"
+VERSION_ID="24.04"
+VERSION="24.04.5 LTS (Noble Numbat)"
+
+## CPU
+CPU(s):                                  12
+Model name:                              13th Gen Intel(R) Core(TM) i5-13420H
+Thread(s) per core:                      2
+Core(s) per socket:                      6
+Socket(s):                               1
+L2 cache:                                7.5 MiB (6 instances)
+L3 cache:                                12 MiB (1 instance)
+SMT active: 1
+governor: unknown
+current MHz (cpu0): 2611.198
+
+## power (the review asks for performance mode on AC power)
+Windows power plan: Power Scheme GUID: 381b4222-f694-41f0-9685-ff5bb260df2e  (Balanced)
+Windows AC power: True
+
+## memory
+               total        used        free      shared  buff/cache   available
+Mem:           7.6Gi       446Mi       6.9Gi       3.6Mi       357Mi       7.1Gi
+Swap:          2.0Gi          0B       2.0Gi
+
+## GPU
+name, memory.total [MiB], memory.used [MiB], driver_version, pstate, clocks.current.sm [MHz], clocks.max.sm [MHz], pcie.link.gen.current, pcie.link.gen.max, pcie.link.width.current, pcie.link.width.max, power.draw [W], power.limit [W]
+NVIDIA GeForce RTX 4050 Laptop GPU, 6141 MiB, 0 MiB, 610.91, P0, 2130 MHz, 3105 MHz, 4, 4, 8, 8, 13.33 W, [N/A]
+nvcc: /usr/local/cuda-12.6/bin/nvcc Build cuda_12.6.r12.6/compiler.35059454_0
+conduit_gpu info: GPU NVIDIA GeForce RTX 4050 Laptop GPU, 20 SMs, 6140 MiB, cc 8.9, driver 13.3, runtime 12.6; backend cuda; OpenMP on
+
+c++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0
+cmake version 3.28.3

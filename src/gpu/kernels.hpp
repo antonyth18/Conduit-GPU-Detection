@@ -278,6 +278,22 @@ CDX_HD void record_count(uint32_t i, const uint64_t* lo, const uint32_t* gflag,
     if ((lo_mode(lo[ps]) | lo_mode(lo[i])) == (K_READ | K_COMM)) atomic_add_u64(read_comm, len);
 }
 
+// Middle mapping: one thread per record writes all of its in-edges (the
+// previous run) at its own offset. Balanced across key groups, but a record
+// that follows a long run (a WRITE after thousands of READs) is still one
+// thread's serial loop.
+CDX_HD void record_emit(uint32_t c, const uint64_t* eoff, const uint64_t* lo,
+                        const uint32_t* gflag, const uint32_t* rscan, const uint32_t* rstart,
+                        uint64_t* edges) {
+    const uint32_t r = rscan[c] - 1;
+    const uint32_t s = rstart[r];
+    if (gflag[s]) return;
+    const uint32_t ps = rstart[r - 1];
+    uint64_t out = eoff[c];
+    const uint64_t v = lo_tx(lo[c]);
+    for (uint32_t a = ps; a < s; ++a) edges[out++] = (uint64_t(lo_tx(lo[a])) << 32) | v;
+}
+
 // eoff: exclusive scan of ecount, length R + 1 (eoff[R] = E).
 CDX_HD void edge_emit(uint64_t e, uint32_t R, const uint64_t* eoff, const uint64_t* lo,
                       const uint32_t* rscan, const uint32_t* rstart, uint64_t* edges) {

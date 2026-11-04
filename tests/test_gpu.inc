@@ -80,7 +80,7 @@ TEST(gpu_pipeline_identical_to_seq_std) {
                 std::vector<Tx> txs = random_txs(n, 40, h);
                 for (Policy p : {Policy::P1, Policy::P2, Policy::P3}) {
                     const Result ref = run_pipeline(txs.data(), n, p, SELS);
-                    for (DetectMode d : {DetectMode::Group, DetectMode::Balanced})
+                    for (DetectMode d : {DetectMode::Group, DetectMode::Record, DetectMode::Balanced})
                         for (GpuLevel l : {GpuLevel::Sweep, GpuLevel::Kahn, GpuLevel::JpIndex})
                             for (uint32_t T : {0u, 16u, 1u << 30}) {
                                 GpuOptions o;
@@ -222,4 +222,33 @@ TEST(dag_simulation_bounds) {
     CHECK(simulate_dag(g, c, 0).makespan == 10);   // critical path max(6, 10)
     CHECK(simulate_dag(g, c, 1).makespan == 16);   // serial
     CHECK(simulate_dag(g, c, 2).makespan == 10);
+}
+
+TEST(gpu_stages_match_cpu_stages) {
+    // Phase 8 "port stage by stage": every intermediate equals the CPU stage
+    std::vector<Tx> txs = random_txs(3000, 50, 20);
+    for (GpuBackend be : gpu_backends())
+        for (Policy p : {Policy::P1, Policy::P2, Policy::P3})
+            for (DetectMode d : {DetectMode::Group, DetectMode::Record, DetectMode::Balanced}) {
+                std::vector<Record> rec = extract(txs.data(), txs.size(), p, SELS);
+                GpuCapture cap;
+                GpuOptions o;
+                o.backend = be;
+                o.detect = d;
+                o.capture = &cap;
+                const Result r = run_pipeline_gpu(txs.data(), txs.size(), p, SELS, o);
+                CHECK(cap.extracted == rec);                 // stage 1, element for element
+                sort_records(rec);
+                CHECK(cap.sorted == rec);                    // stage 2a
+                std::vector<uint64_t> e = detect(rec, nullptr);
+                if (d == DetectMode::Group) CHECK(cap.edges == e);   // same emission order
+                std::vector<uint64_t> a = cap.edges, b = e;
+                std::sort(a.begin(), a.end());
+                std::sort(b.begin(), b.end());
+                CHECK(a == b);                               // stage 2b, as a multiset
+                const Graph g = build_csr(uint32_t(txs.size()), e);
+                CHECK(g.cols == r.graph.cols);               // stage 3
+                CHECK(g.row_offsets == r.graph.row_offsets);
+                CHECK(level(g) == r.levels);                 // stage 4
+            }
 }

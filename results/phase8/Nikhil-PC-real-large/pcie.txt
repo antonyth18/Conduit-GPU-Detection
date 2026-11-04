@@ -1,0 +1,13 @@
+conduit_gpu pcie: GPU NVIDIA GeForce RTX 4050 Laptop GPU, 20 SMs, 6140 MiB, cc 8.9, driver 13.3, runtime 12.6; backend cuda; OpenMP on
+       bytes   H2D pinned   D2H pinned H2D pageable D2H pageable   (GB/s, median of 7)
+        4096         0.55         0.80         0.80         0.12
+       16384         2.93         3.01         2.67         0.46
+       65536         6.97         7.47         7.11         1.77
+      262144        10.72        11.07        10.00         3.80
+     1048576        12.37        12.61         7.75         5.12
+     4194304        12.69        12.75         9.50         7.69
+    16777216        10.56        10.42         7.51         7.12
+    67108864        10.34        10.08         7.91         6.41
+   268435456        10.13         9.96         7.31         6.79
+empty kernel launch + sync: 34.3 us; one device->host read (sync round trip): 33.1 us
+wrote results/phase8/Nikhil-PC-real-large/pcie.csv
